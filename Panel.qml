@@ -34,6 +34,9 @@ Panel {
   readonly property bool active: root.status !== "idle"
   readonly property real progress: Math.min(1, Math.max(0, (root.index > 0 ? root.index : 1) / Math.max(1, root.total)))
 
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
   Commons.Translations {
     id: strings
     directory: Qt.resolvedUrl("i18n")
