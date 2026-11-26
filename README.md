@@ -8,7 +8,7 @@ A small Omarchy shell plugin that turns selected text into speech with local Sil
 - Fully offline synthesis after the first model download; no cloud TTS service.
 - Streaming playback: chunk 1 starts while chunks 2, 3, ... are still being synthesized.
 - Automatic Russian/English voice selection based on Cyrillic characters.
-- Optional local LLM preparation of Russian text: Latin words are transliterated, stress marks and SSML intonation are added before synthesis.
+- Optional local LLM preparation of Russian text: Latin words are transliterated with camelCase/acronym rules (`userID` → юзер ай ди, `API-First` → Эй Пи Ай фёст), and stress marks and SSML intonation are added before synthesis.
 - Bar icon with a keyboard panel: play/pause, stop, jump ±5 seconds, previous/next chunk, speed control, text preparation toggle, and download.
 - Smart progress bar: tracks the current chunk during generation and the whole recording once generation is complete.
 - Scrubbing by mouse or keyboard; percentage and ETA are visible while preparing audio.
