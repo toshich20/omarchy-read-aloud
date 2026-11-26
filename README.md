@@ -107,7 +107,7 @@ If the bar icon does not appear after an update, restart the shell:
 omarchy restart shell
 ```
 
-If `edge-tts` reports `NoAudioReceived`, the service is temporarily rejecting a request; the plugin retries failed chunks with short backoff.
+If `edge-tts` reports `NoAudioReceived`, the service is temporarily rejecting a request; the plugin retries failed chunks with short backoff. Every attempt is logged to `$XDG_RUNTIME_DIR/read-aloud/tts.log`.
 
 To verify synthesis directly:
 
