@@ -18,6 +18,40 @@ text=$(wl-paste -p 2>/dev/null)
 [[ -z "$text" ]] && text=$(wl-paste 2>/dev/null)
 [[ -z "$text" ]] && exit 0
 
+voices=$(python3 - <<'PY'
+import json
+import os
+
+ru = "ru-RU-DmitryNeural"
+en = "en-US-AndrewNeural"
+path = os.path.expanduser("~/.config/omarchy/shell.json")
+
+def walk(node):
+    global ru, en
+    if isinstance(node, dict):
+        if node.get("id") == "toshich20.read-aloud":
+            ru = str(node.get("ruVoice", ru))
+            en = str(node.get("enVoice", en))
+        for value in node.values():
+            walk(value)
+    elif isinstance(node, list):
+        for value in node:
+            walk(value)
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        walk(json.load(handle))
+except (OSError, ValueError):
+    pass
+
+print(ru)
+print(en)
+PY
+)
+mapfile -t voice_settings <<< "$voices"
+ru_voice="${voice_settings[0]:-ru-RU-DmitryNeural}"
+en_voice="${voice_settings[1]:-en-US-AndrewNeural}"
+
 mkdir -p "$runtime"
 
 cleanup() {
@@ -49,9 +83,9 @@ for chunk in "${chunks[@]}"; do
   write_state synthesizing "$index" "$total" "$failed"
 
   if printf '%s' "$chunk" | grep -q '[А-Яа-яЁё]'; then
-    voice="ru-RU-DmitryNeural"
+    voice="$ru_voice"
   else
-    voice="en-US-AndrewNeural"
+    voice="$en_voice"
   fi
 
   audio="$runtime/chunk-$(printf '%03d' "$index").mp3"

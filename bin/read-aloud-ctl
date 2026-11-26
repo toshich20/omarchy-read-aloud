@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+import json
+import os
+import socket
+import sys
+
+runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp") + "/read-aloud"
+state_path = runtime + "/state.json"
+socket_path = runtime + "/mpv.sock"
+action = sys.argv[1] if len(sys.argv) > 1 else "status"
+
+if action == "status":
+    try:
+        with open(state_path, encoding="utf-8") as handle:
+            print(handle.read().strip())
+    except OSError:
+        print('{"status":"idle","index":0,"total":0,"failed":0}')
+    sys.exit(0)
+
+commands = {
+    "pause": ["set_property", "pause", True],
+    "resume": ["set_property", "pause", False],
+    "toggle": ["cycle", "pause"],
+    "next": ["playlist-next"],
+    "prev": ["playlist-prev"],
+    "stop": ["quit"],
+}
+if action not in commands:
+    sys.exit(2)
+
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(1)
+        client.connect(socket_path)
+        payload = {"command": commands[action], "request_id": 1}
+        client.sendall((json.dumps(payload) + "\n").encode())
+        try:
+            client.recv(4096)
+        except socket.timeout:
+            pass
+except OSError as error:
+    print(str(error), file=sys.stderr)
+    sys.exit(1)

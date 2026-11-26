@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "toshich20.read-aloud",
+  "name": "Read Aloud",
+  "version": "0.2.0",
+  "author": "toshich20",
+  "description": "Reads selected text aloud with edge-tts, split into chunks for long passages.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Read Aloud",
+    "description": "Bar icon and player panel for edge-tts speech synthesis.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "ruVoice": "ru-RU-DmitryNeural",
+      "enVoice": "en-US-AndrewNeural"
+    },
+    "schema": [
+      {
+        "key": "ruVoice",
+        "type": "enum",
+        "label": "Russian voice",
+        "options": ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"],
+        "defaultValue": "ru-RU-DmitryNeural"
+      },
+      {
+        "key": "enVoice",
+        "type": "enum",
+        "label": "English voice",
+        "options": ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"],
+        "defaultValue": "en-US-AndrewNeural"
+      }
+    ]
+  }
+}
