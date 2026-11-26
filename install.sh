@@ -9,4 +9,4 @@ if [[ -e "$LINK" && ! -L "$LINK" ]]; then
   rm -f "$LINK"
 fi
 ln -sfn "$SRC/bin/read-aloud" "$LINK"
-chmod +x "$SRC/bin/read-aloud" "$SRC/bin/split-text.py"
+chmod +x "$SRC/bin/read-aloud" "$SRC/bin/read-aloud-ctl" "$SRC/bin/read-aloud-save" "$SRC/bin/split-text.py"

@@ -3,18 +3,120 @@ import json
 import os
 import socket
 import sys
+import time
 
 runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp") + "/read-aloud"
 state_path = runtime + "/state.json"
 socket_path = runtime + "/mpv.sock"
 action = sys.argv[1] if len(sys.argv) > 1 else "status"
 
-if action == "status":
+
+def read_state():
     try:
         with open(state_path, encoding="utf-8") as handle:
-            print(handle.read().strip())
-    except OSError:
-        print('{"status":"idle","index":0,"total":0,"failed":0}')
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {"status": "idle", "index": 0, "total": 0, "failed": 0}
+
+
+def send(command):
+    request_id = 1
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(1)
+            client.connect(socket_path)
+            payload = {"command": command, "request_id": request_id}
+            client.sendall((json.dumps(payload) + "\n").encode())
+            data = b""
+            try:
+                while b"\n" not in data:
+                    chunk = client.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+            except socket.timeout:
+                pass
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return {}
+
+    for line in data.decode("utf-8", "replace").splitlines():
+        try:
+            reply = json.loads(line)
+        except ValueError:
+            continue
+        if reply.get("request_id") == request_id:
+            return reply
+    return {}
+
+
+def mpv_properties():
+    if not os.path.exists(socket_path):
+        return {}
+    result = {}
+    for key, name in (("position", "time-pos"), ("duration", "duration"),
+                      ("mpvIndex", "playlist-pos"), ("paused", "pause")):
+        reply = send(["get_property", name])
+        if "data" in reply:
+            result[key] = reply["data"]
+    return result
+
+
+def durations_from(state):
+    values = state.get("durations")
+    if not isinstance(values, list):
+        return []
+    out = []
+    for value in values:
+        try:
+            out.append(max(0.0, float(value)))
+        except (TypeError, ValueError):
+            out.append(0.0)
+    return out
+
+
+if action == "status":
+    state = read_state()
+    if state.get("status") == "playing":
+        state.update(mpv_properties())
+    durations = durations_from(state)
+    if durations and "position" in state:
+        idx = state.get("mpvIndex")
+        if not isinstance(idx, int) or idx < 0:
+            try:
+                idx = max(0, int(state.get("index", 1)) - 1)
+            except (TypeError, ValueError):
+                idx = 0
+        idx = min(idx, len(durations) - 1)
+        try:
+            position = max(0.0, float(state.get("position", 0)))
+        except (TypeError, ValueError):
+            position = 0.0
+        total = sum(durations)
+        state["duration"] = total
+        state["elapsed"] = min(total, sum(durations[:idx]) + position)
+    state.pop("mpvIndex", None)
+    print(json.dumps(state, ensure_ascii=False, separators=(",", ":")))
+    sys.exit(0)
+
+if action == "seek":
+    try:
+        target = max(0.0, float(sys.argv[2]))
+    except (ValueError, IndexError):
+        sys.exit(2)
+    durations = durations_from(read_state())
+    if durations:
+        remaining = target
+        for idx, duration in enumerate(durations):
+            if remaining <= duration or idx == len(durations) - 1:
+                send(["set_property", "playlist-pos", idx])
+                time.sleep(0.15)
+                send(["set_property", "time-pos", max(0.0, remaining)])
+                break
+            remaining -= duration
+    else:
+        send(["seek", target, "absolute"])
     sys.exit(0)
 
 commands = {

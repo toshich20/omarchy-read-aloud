@@ -15,9 +15,8 @@ Panel {
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color accent: Commons.Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-  readonly property string statePath: runtimeDir + "/read-aloud/state.json"
   readonly property string ctlScript: localPath("bin/read-aloud-ctl")
+  readonly property string saveScript: localPath("bin/read-aloud-save")
   readonly property string readScript: localPath("bin/read-aloud")
 
   readonly property var ruVoices: ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"]
@@ -27,12 +26,20 @@ Panel {
   property int index: 0
   property int total: 0
   property int failed: 0
+  property int prepared: 0
+  property int percent: 0
+  property int eta: 0
+  property real position: 0
+  property real elapsed: 0
+  property real duration: 0
   property bool paused: false
+  property bool downloadable: false
 
   readonly property string ruVoice: selectVoice(root.ruVoices, "ruVoice")
   readonly property string enVoice: selectVoice(root.enVoices, "enVoice")
   readonly property bool active: root.status !== "idle"
-  readonly property real progress: Math.min(1, Math.max(0, (root.index > 0 ? root.index : 1) / Math.max(1, root.total)))
+  readonly property real progressValue: root.status === "synthesizing" ? root.percent : (root.duration > 0 ? root.elapsed : 0)
+  readonly property real progressMaximum: root.status === "synthesizing" ? 100 : Math.max(1, root.duration)
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -52,9 +59,29 @@ Panel {
     return Math.min(maximum, Math.round(number))
   }
 
+  function numberOr(value, fallback) {
+    var number = Number(value)
+    return isFinite(number) ? number : fallback
+  }
+
   function selectVoice(voices, key) {
     var configured = String(root.setting(key, voices[0]))
     return voices.indexOf(configured) >= 0 ? configured : voices[0]
+  }
+
+  function resetState() {
+    root.status = "idle"
+    root.index = 0
+    root.total = 0
+    root.failed = 0
+    root.prepared = 0
+    root.percent = 0
+    root.eta = 0
+    root.position = 0
+    root.elapsed = 0
+    root.duration = 0
+    root.paused = false
+    root.downloadable = false
   }
 
   function loadState(raw) {
@@ -65,23 +92,38 @@ Panel {
       parsed = null
     }
     if (!parsed || typeof parsed !== "object") {
-      root.status = "idle"
-      root.index = 0
-      root.total = 0
-      root.failed = 0
+      root.resetState()
       return
     }
-    var allowed = ["idle", "synthesizing", "playing"]
+    var allowed = ["idle", "synthesizing", "playing", "ready"]
     var nextStatus = String(parsed.status || "idle")
     root.status = allowed.indexOf(nextStatus) >= 0 ? nextStatus : "idle"
     root.index = clampInt(parsed.index, 100000)
     root.total = clampInt(parsed.total, 100000)
     root.failed = clampInt(parsed.failed, 100000)
+    root.prepared = clampInt(parsed.prepared, 100000)
+    root.percent = clampInt(parsed.percent, 100)
+    root.eta = clampInt(parsed.eta, 86400)
+    root.position = Math.max(0, numberOr(parsed.position, 0))
+    root.elapsed = Math.max(0, numberOr(parsed.elapsed, 0))
+    root.duration = Math.max(0, numberOr(parsed.duration, 0))
+    root.paused = parsed.paused === true
+    root.downloadable = root.status === "ready" || (root.status === "playing" && root.duration > 0)
+  }
+
+  function formatTime(value) {
+    var seconds = Math.max(0, Math.floor(numberOr(value, 0)))
+    var minutes = Math.floor(seconds / 60)
+    var rest = seconds % 60
+    return minutes + ":" + (rest < 10 ? "0" : "") + rest
   }
 
   function statusText() {
-    if (root.status === "synthesizing") return strings.t("synthesizing").arg(root.index).arg(root.total)
+    if (root.status === "synthesizing")
+      return strings.t("synthesizing").arg(Math.max(1, root.index)).arg(root.total)
+        .arg(Commons.I18n.formatNumber(root.percent)).arg(Commons.I18n.formatNumber(root.eta))
     if (root.status === "playing") return strings.t("playing").arg(Math.max(1, root.index)).arg(root.total)
+    if (root.status === "ready") return strings.t("ready")
     if (root.failed > 0) return strings.t("failed").arg(root.failed)
     return strings.t("idle")
   }
@@ -109,31 +151,53 @@ Panel {
     ctlProcess.running = true
   }
 
+  function seek(value) {
+    if (root.status !== "playing" || seekProcess.running) return
+    seekProcess.command = [root.ctlScript, "seek", String(Math.max(0, value))]
+    seekProcess.running = true
+  }
+
+  function save() {
+    if (!root.downloadable || saveProcess.running) return
+    saveProcess.running = true
+  }
+
   function readSelection() {
     root.paused = false
     Quickshell.execDetached([root.readScript])
   }
 
-  FileView {
-    id: stateFile
-    path: root.statePath
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.loadState(text())
-    onLoadFailed: root.loadState("{}")
-    onFileChanged: reload()
+  Process {
+    id: statusProcess
+    command: [root.ctlScript, "status"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.loadState(text)
+    }
   }
 
   Timer {
     interval: 500
     running: true
     repeat: true
-    onTriggered: stateFile.reload()
+    onTriggered: if (!statusProcess.running) statusProcess.running = true
   }
+
+  Component.onCompleted: statusProcess.running = true
 
   Process {
     id: ctlProcess
     command: []
+  }
+
+  Process {
+    id: seekProcess
+    command: []
+  }
+
+  Process {
+    id: saveProcess
+    command: [root.saveScript]
   }
 
   ShellIpc {
@@ -150,7 +214,12 @@ Panel {
         status: root.status,
         index: root.index,
         total: root.total,
-        failed: root.failed
+        failed: root.failed,
+        percent: root.percent,
+        eta: root.eta,
+        elapsed: root.elapsed,
+        duration: root.duration,
+        downloadable: root.downloadable
       })
     }
   }
@@ -177,7 +246,7 @@ Panel {
     open: root.opened
     focusTarget: panel.loadedContent
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(420))
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(480))
 
     content: PanelKeyCatcher {
       id: keyCatcher
@@ -189,6 +258,7 @@ Panel {
         if (key === "p" || key === "P") root.ctl("toggle")
         else if (key === "s" || key === "S") root.ctl("stop")
         else if (key === "r" || key === "R") root.readSelection()
+        else if (key === "d" || key === "D") root.save()
       }
 
       Column {
@@ -205,18 +275,30 @@ Panel {
           fontFamily: root.fontFamily
         }
 
-        Rectangle {
+        Row {
           width: parent.width
-          height: Style.space(6)
-          radius: height / 2
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+          spacing: Style.space(8)
 
-          Rectangle {
-            width: parent.width * root.progress
-            height: parent.height
-            radius: parent.radius
-            color: root.accent
-            visible: root.active
+          PanelSlider {
+            id: seekBar
+            bar: root.bar
+            width: parent.width - timeText.implicitWidth - parent.spacing
+            minimum: 0
+            maximum: root.progressMaximum
+            step: 1
+            value: root.progressValue
+            enabled: root.status === "playing" && root.duration > 0
+            onReleased: function(value) { root.seek(value) }
+          }
+
+          Text {
+            id: timeText
+            text: root.duration > 0 ? root.formatTime(root.elapsed) + " / " + root.formatTime(root.duration) : ""
+            textFormat: Text.PlainText
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
           }
         }
 
@@ -224,43 +306,63 @@ Panel {
           spacing: Style.space(8)
 
           Button {
-            text: root.paused ? strings.t("resume") : strings.t("pause")
+            iconText: root.paused ? "\uf04b" : "\uf04c"
+            tooltipText: root.paused ? strings.t("resume") : strings.t("pause")
+            bordered: true
             focusable: true
             enabled: root.active
             onClicked: root.ctl("toggle")
           }
 
           Button {
-            text: strings.t("stop")
+            iconText: "\uf04d"
+            tooltipText: strings.t("stop")
+            bordered: true
             focusable: true
             enabled: root.active
             onClicked: root.ctl("stop")
           }
 
           Button {
-            text: strings.t("previous")
+            iconText: "\uf048"
+            tooltipText: strings.t("previous")
+            bordered: true
             focusable: true
             enabled: root.active
             onClicked: root.ctl("prev")
           }
 
           Button {
-            text: strings.t("next")
+            iconText: "\uf050"
+            tooltipText: strings.t("next")
+            bordered: true
             focusable: true
             enabled: root.active
             onClicked: root.ctl("next")
           }
+
+          Button {
+            iconText: "\uf019"
+            tooltipText: strings.t("download")
+            bordered: true
+            focusable: true
+            enabled: root.downloadable
+            onClicked: root.save()
+          }
         }
 
         Button {
-          text: strings.t("read")
+          iconText: "\uf04b"
+          tooltipText: strings.t("read")
+          bordered: true
           focusable: true
-          leftAlign: true
           onClicked: root.readSelection()
         }
 
         Button {
           text: strings.t("ruVoice") + ": " + root.ruVoice
+          tooltipText: strings.t("ruVoice")
+          bordered: true
           focusable: true
           leftAlign: true
           onClicked: root.cycleVoice("ruVoice", root.ruVoices)
@@ -268,6 +370,8 @@ Panel {
 
         Button {
           text: strings.t("enVoice") + ": " + root.enVoice
+          tooltipText: strings.t("enVoice")
+          bordered: true
           focusable: true
           leftAlign: true
           onClicked: root.cycleVoice("enVoice", root.enVoices)

@@ -4,11 +4,20 @@ runtime="${XDG_RUNTIME_DIR:-/tmp}/read-aloud"
 pidfile="$runtime/pid"
 state="$runtime/state.json"
 socket="$runtime/mpv.sock"
+playlist="$runtime/playlist.txt"
+concat_list="$runtime/concat.txt"
+final="$runtime/final.mp3"
+keep_state=0
+
+ipc() {
+  qs ipc --path /usr/share/omarchy/shell call toshich20.read-aloud "$1" >/dev/null 2>&1 || true
+}
 
 if [[ -f "$pidfile" ]]; then
   pid=$(<"$pidfile")
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null
+    ipc close
   fi
   rm -f "$pidfile"
   exit 0
@@ -53,34 +62,67 @@ ru_voice="${voice_settings[0]:-ru-RU-DmitryNeural}"
 en_voice="${voice_settings[1]:-en-US-AndrewNeural}"
 
 mkdir -p "$runtime"
+rm -f "$state" "$socket" "$playlist" "$concat_list" "$final" "$runtime"/chunk-*.mp3
 
 cleanup() {
   [[ -n "${mpv_pid:-}" ]] && kill "$mpv_pid" 2>/dev/null
   [[ -n "${tts_pid:-}" ]] && kill "$tts_pid" 2>/dev/null
-  rm -rf "$runtime"
+  rm -f "$pidfile" "$socket" "$playlist" "$concat_list" "$runtime"/chunk-*.mp3
+  (( keep_state )) || rm -f "$state"
 }
 trap cleanup EXIT
 trap 'trap - EXIT; cleanup; exit 0' INT TERM
 
-printf '%s\n' "$$" > "$pidfile"
-
 write_state() {
-  printf '{"status":"%s","index":%d,"total":%d,"failed":%d}\n' "$1" "$2" "$3" "$4" > "$state"
+  python3 - "$state" "$@" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+data = {}
+for arg in sys.argv[2:]:
+    key, _, value = arg.partition("=")
+    if key == "durations":
+        data[key] = [float(item) for item in value.split(",") if item]
+    elif key in {"index", "total", "failed", "prepared", "percent", "eta"}:
+        data[key] = int(float(value or 0))
+    elif key in {"duration", "elapsed"}:
+        data[key] = float(value or 0)
+    else:
+        data[key] = value
+
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+    handle.write("\n")
+os.replace(tmp, path)
+PY
 }
+
+printf '%s\n' "$$" > "$pidfile"
+ipc open
 
 mapfile -d '' -t chunks < <(python3 "$plugin_dir/bin/split-text.py" 450 <<< "$text")
 total=${#chunks[@]}
 [[ "$total" -eq 0 ]] && exit 0
 
-playlist="$runtime/playlist.txt"
 : > "$playlist"
+: > "$concat_list"
+audio_files=()
+durations=()
 failed=0
 index=0
+prepared=0
+started=$(date +%s)
 tts_pid=""
 
 for chunk in "${chunks[@]}"; do
   index=$((index + 1))
-  write_state synthesizing "$index" "$total" "$failed"
+  elapsed=$(( $(date +%s) - started ))
+  if (( prepared > 0 )); then eta=$(( elapsed * (total - prepared) / prepared )); else eta=0; fi
+  percent=$(( prepared * 100 / total ))
+  write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
 
   if printf '%s' "$chunk" | grep -q '[А-Яа-яЁё]'; then
     voice="$ru_voice"
@@ -99,20 +141,48 @@ for chunk in "${chunks[@]}"; do
   done
 
   if (( ok )); then
-    printf '%s\n' "$audio" >> "$playlist"
+    audio_files+=("$audio")
+    prepared=$((prepared + 1))
   else
     failed=$((failed + 1))
   fi
+  percent=$(( prepared * 100 / total ))
+  write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
   sleep 1
 done
 
 tts_pid=""
-if [[ -s "$playlist" ]]; then
-  write_state playing 0 "$total" "$failed"
-  mpv --no-video --really-quiet --input-ipc-server="$socket" --playlist="$playlist" & mpv_pid=$!
-  wait "$mpv_pid"
+if (( ${#audio_files[@]} == 0 )); then
+  notify-send "Озвучка текста" "Не удалось озвучить ни одного куска" 2>/dev/null || true
+  exit 1
 fi
+
+for audio in "${audio_files[@]}"; do
+  printf '%s\n' "$audio" >> "$playlist"
+  printf "file '%s'\n" "$audio" >> "$concat_list"
+done
+
+ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i "$concat_list" -c copy "$final" >/dev/null 2>&1 || cat "${audio_files[@]}" > "$final"
+total_duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$final" 2>/dev/null || true)
+durations=()
+for audio in "${audio_files[@]}"; do
+  value=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$audio" 2>/dev/null || true)
+  durations+=("${value:-0}")
+done
+duration_list=$(IFS=,; echo "${durations[*]}")
+if [[ -z "$total_duration" || "$total_duration" == "N/A" ]]; then
+  total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
+fi
+
+write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent=100 eta=0 duration="$total_duration" elapsed=0 durations="$duration_list" audioPath="$final"
+
+mpv --no-video --really-quiet --input-ipc-server="$socket" --playlist="$playlist" & mpv_pid=$!
+wait "$mpv_pid"
+mpv_pid=""
 
 if (( failed > 0 )); then
   notify-send "Озвучка текста" "Не удалось озвучить $failed из $total кусков" 2>/dev/null || true
 fi
+
+keep_state=1
+write_state status=ready index="$total" total="$total" failed="$failed" prepared="$prepared" percent=100 eta=0 duration="$total_duration" elapsed="$total_duration" durations="$duration_list" audioPath="$final"

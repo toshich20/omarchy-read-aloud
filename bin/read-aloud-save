@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime="${XDG_RUNTIME_DIR:-/tmp}/read-aloud"
+source="$runtime/final.mp3"
+
+if [[ ! -s "$source" ]]; then
+  notify-send "Озвучка текста" "Нет готового аудиофайла" 2>/dev/null || true
+  exit 1
+fi
+
+target=$(zenity --file-selection --save --filename='read-aloud.mp3' --file-filter='MP3 *.mp3' 2>/dev/null) || exit 0
+[[ -n "$target" ]] || exit 0
+case "$target" in
+  *.mp3) ;;
+  *) target="$target.mp3" ;;
+esac
+
+if [[ -e "$target" ]]; then
+  zenity --question --text="Файл уже существует. Перезаписать?" 2>/dev/null || exit 0
+fi
+
+cp -- "$source" "$target"
+notify-send "Озвучка текста" "Файл сохранён: $target" 2>/dev/null || true

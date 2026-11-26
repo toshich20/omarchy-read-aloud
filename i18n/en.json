@@ -1,14 +1,16 @@
 {
   "title": "Read Aloud",
   "idle": "Nothing is being read",
-  "synthesizing": "Preparing chunk %1 of %2",
+  "synthesizing": "Preparing chunk %1 of %2 · %3% · ETA %4s",
   "playing": "Reading chunk %1 of %2",
+  "ready": "Recording ready",
   "read": "Read selection",
   "pause": "Pause",
   "resume": "Resume",
   "stop": "Stop",
   "previous": "Previous chunk",
   "next": "Next chunk",
+  "download": "Download MP3",
   "ruVoice": "Russian voice",
   "enVoice": "English voice",
   "failed": "%1 chunk(s) failed"
