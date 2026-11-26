@@ -124,6 +124,13 @@ Panel {
     onFileChanged: reload()
   }
 
+  Timer {
+    interval: 500
+    running: true
+    repeat: true
+    onTriggered: stateFile.reload()
+  }
+
   Process {
     id: ctlProcess
     command: []
