@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+plugin_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+runtime="${XDG_RUNTIME_DIR:-/tmp}/read-aloud"
+pidfile="$runtime/pid"
+state="$runtime/state.json"
+socket="$runtime/mpv.sock"
+
+if [[ -f "$pidfile" ]]; then
+  pid=$(<"$pidfile")
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+  fi
+  rm -f "$pidfile"
+  exit 0
+fi
+
+text=$(wl-paste -p 2>/dev/null)
+[[ -z "$text" ]] && text=$(wl-paste 2>/dev/null)
+[[ -z "$text" ]] && exit 0
+
+mkdir -p "$runtime"
+
+cleanup() {
+  [[ -n "${mpv_pid:-}" ]] && kill "$mpv_pid" 2>/dev/null
+  [[ -n "${tts_pid:-}" ]] && kill "$tts_pid" 2>/dev/null
+  rm -rf "$runtime"
+}
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 0' INT TERM
+
+printf '%s\n' "$$" > "$pidfile"
+
+write_state() {
+  printf '{"status":"%s","index":%d,"total":%d,"failed":%d}\n' "$1" "$2" "$3" "$4" > "$state"
+}
+
+mapfile -d '' -t chunks < <(python3 "$plugin_dir/bin/split-text.py" 450 <<< "$text")
+total=${#chunks[@]}
+[[ "$total" -eq 0 ]] && exit 0
+
+playlist="$runtime/playlist.txt"
+: > "$playlist"
+failed=0
+index=0
+tts_pid=""
+
+for chunk in "${chunks[@]}"; do
+  index=$((index + 1))
+  write_state synthesizing "$index" "$total" "$failed"
+
+  if printf '%s' "$chunk" | grep -q '[А-Яа-яЁё]'; then
+    voice="ru-RU-DmitryNeural"
+  else
+    voice="en-US-AndrewNeural"
+  fi
+
+  audio="$runtime/chunk-$(printf '%03d' "$index").mp3"
+  ok=0
+  for delay in 0 1 3; do
+    sleep "$delay"
+    if edge-tts --voice "$voice" --text "$chunk" --write-media "$audio" >/dev/null 2>&1 & tts_pid=$!; wait "$tts_pid"; then
+      ok=1
+      break
+    fi
+  done
+
+  if (( ok )); then
+    printf '%s\n' "$audio" >> "$playlist"
+  else
+    failed=$((failed + 1))
+  fi
+  sleep 1
+done
+
+tts_pid=""
+if [[ -s "$playlist" ]]; then
+  write_state playing 0 "$total" "$failed"
+  mpv --no-video --really-quiet --input-ipc-server="$socket" --playlist="$playlist" & mpv_pid=$!
+  wait "$mpv_pid"
+fi
+
+if (( failed > 0 )); then
+  notify-send "Озвучка текста" "Не удалось озвучить $failed из $total кусков" 2>/dev/null || true
+fi
