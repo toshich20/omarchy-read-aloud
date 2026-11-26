@@ -108,7 +108,7 @@ Panel {
     root.elapsed = Math.max(0, numberOr(parsed.elapsed, 0))
     root.duration = Math.max(0, numberOr(parsed.duration, 0))
     root.paused = parsed.paused === true
-    root.downloadable = root.status === "ready" || (root.status === "playing" && root.duration > 0)
+    root.downloadable = root.status === "ready"
   }
 
   function formatTime(value) {
@@ -122,7 +122,12 @@ Panel {
     if (root.status === "synthesizing")
       return strings.t("synthesizing").arg(Math.max(1, root.index)).arg(root.total)
         .arg(Commons.I18n.formatNumber(root.percent)).arg(Commons.I18n.formatNumber(root.eta))
-    if (root.status === "playing") return strings.t("playing").arg(Math.max(1, root.index)).arg(root.total)
+    if (root.status === "playing") {
+      if (root.prepared < root.total)
+        return strings.t("playingPreparing").arg(Math.max(1, root.index)).arg(root.total)
+          .arg(Commons.I18n.formatNumber(root.percent)).arg(Commons.I18n.formatNumber(root.eta))
+      return strings.t("playing").arg(Math.max(1, root.index)).arg(root.total)
+    }
     if (root.status === "ready") return strings.t("ready")
     if (root.failed > 0) return strings.t("failed").arg(root.failed)
     return strings.t("idle")

@@ -82,22 +82,41 @@ if action == "status":
         state.update(mpv_properties())
     durations = durations_from(state)
     if durations and "position" in state:
-        idx = state.get("mpvIndex")
-        if not isinstance(idx, int) or idx < 0:
-            try:
+        try:
+            idx = state.get("mpvIndex")
+            if not isinstance(idx, int) or idx < 0:
                 idx = max(0, int(state.get("index", 1)) - 1)
-            except (TypeError, ValueError):
-                idx = 0
+        except (TypeError, ValueError):
+            idx = 0
         idx = min(idx, len(durations) - 1)
         try:
             position = max(0.0, float(state.get("position", 0)))
         except (TypeError, ValueError):
             position = 0.0
         total = sum(durations)
+        state["index"] = idx + 1
         state["duration"] = total
         state["elapsed"] = min(total, sum(durations[:idx]) + position)
     state.pop("mpvIndex", None)
     print(json.dumps(state, ensure_ascii=False, separators=(",", ":")))
+    sys.exit(0)
+
+if action == "append":
+    path = sys.argv[2] if len(sys.argv) > 2 else ""
+    if not path or not os.path.isfile(path):
+        sys.exit(2)
+    reply = send(["loadfile", path, "append-play"])
+    sys.exit(0 if reply.get("error") == "success" else 1)
+
+if action == "wait-end":
+    while os.path.exists(socket_path):
+        idx = send(["get_property", "playlist-pos"]).get("data")
+        count = send(["get_property", "playlist-count"]).get("data")
+        idle = send(["get_property", "idle-active"]).get("data")
+        if isinstance(count, int) and count > 0 and idx == -1 and idle is True:
+            send(["quit"])
+            break
+        time.sleep(0.2)
     sys.exit(0)
 
 if action == "seek":

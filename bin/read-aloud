@@ -67,6 +67,7 @@ rm -f "$state" "$socket" "$playlist" "$concat_list" "$final" "$runtime"/chunk-*.
 cleanup() {
   [[ -n "${mpv_pid:-}" ]] && kill "$mpv_pid" 2>/dev/null
   [[ -n "${tts_pid:-}" ]] && kill "$tts_pid" 2>/dev/null
+  [[ -n "${watcher_pid:-}" ]] && kill "$watcher_pid" 2>/dev/null
   rm -f "$pidfile" "$socket" "$playlist" "$concat_list" "$runtime"/chunk-*.mp3
   (( keep_state )) || rm -f "$state"
 }
@@ -116,13 +117,20 @@ index=0
 prepared=0
 started=$(date +%s)
 tts_pid=""
+mpv_pid=""
+watcher_pid=""
+playback_started=0
 
 for chunk in "${chunks[@]}"; do
   index=$((index + 1))
   elapsed=$(( $(date +%s) - started ))
   if (( prepared > 0 )); then eta=$(( elapsed * (total - prepared) / prepared )); else eta=0; fi
   percent=$(( prepared * 100 / total ))
-  write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
+  if (( playback_started )); then
+    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" duration=0 elapsed=0 audioPath="$final"
+  else
+    write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
+  fi
 
   if printf '%s' "$chunk" | grep -q '[А-Яа-яЁё]'; then
     voice="$ru_voice"
@@ -143,12 +151,27 @@ for chunk in "${chunks[@]}"; do
   if (( ok )); then
     audio_files+=("$audio")
     prepared=$((prepared + 1))
+    duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$audio" 2>/dev/null || true)
+    durations+=("${duration:-0}")
+    duration_list=$(IFS=,; echo "${durations[*]}")
+    total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
+
+    if (( ! playback_started )); then
+      mpv --no-video --really-quiet --idle=yes --input-ipc-server="$socket" "$audio" & mpv_pid=$!
+      for _ in $(seq 1 50); do
+        [[ -S "$socket" ]] && "$plugin_dir/bin/read-aloud-ctl" status >/dev/null 2>&1 && break
+        sleep 0.1
+      done
+      playback_started=1
+    else
+      "$plugin_dir/bin/read-aloud-ctl" append "$audio" >/dev/null 2>&1 || true
+    fi
+
+    percent=$(( prepared * 100 / total ))
+    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" duration="$total_duration" elapsed=0 durations="$duration_list" audioPath="$final"
   else
     failed=$((failed + 1))
   fi
-  percent=$(( prepared * 100 / total ))
-  write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
-  sleep 1
 done
 
 tts_pid=""
@@ -164,20 +187,16 @@ done
 
 ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i "$concat_list" -c copy "$final" >/dev/null 2>&1 || cat "${audio_files[@]}" > "$final"
 total_duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$final" 2>/dev/null || true)
-durations=()
-for audio in "${audio_files[@]}"; do
-  value=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$audio" 2>/dev/null || true)
-  durations+=("${value:-0}")
-done
-duration_list=$(IFS=,; echo "${durations[*]}")
 if [[ -z "$total_duration" || "$total_duration" == "N/A" ]]; then
   total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
 fi
-
+duration_list=$(IFS=,; echo "${durations[*]}")
 write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent=100 eta=0 duration="$total_duration" elapsed=0 durations="$duration_list" audioPath="$final"
 
-mpv --no-video --really-quiet --input-ipc-server="$socket" --playlist="$playlist" & mpv_pid=$!
+"$plugin_dir/bin/read-aloud-ctl" wait-end >/dev/null 2>&1 & watcher_pid=$!
 wait "$mpv_pid"
+kill "$watcher_pid" 2>/dev/null || true
+watcher_pid=""
 mpv_pid=""
 
 if (( failed > 0 )); then
