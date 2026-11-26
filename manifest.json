@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "toshich20.read-aloud",
   "name": "Read Aloud",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "author": "toshich20",
   "description": "Reads selected text aloud with edge-tts, split into chunks for long passages.",
   "kinds": ["bar-widget"],

@@ -381,11 +381,11 @@ Panel {
 
             Image {
               anchors.centerIn: parent
-              width: parent.width * 0.8
-              height: parent.height * 0.8
+              width: parent.width * 0.95
+              height: parent.height * 0.95
               source: root.backIcon
-              sourceSize.width: 96
-              sourceSize.height: 96
+              sourceSize.width: 128
+              sourceSize.height: 128
               fillMode: Image.PreserveAspectFit
               smooth: true
             }
@@ -403,11 +403,11 @@ Panel {
 
             Image {
               anchors.centerIn: parent
-              width: parent.width * 0.8
-              height: parent.height * 0.8
+              width: parent.width * 0.95
+              height: parent.height * 0.95
               source: root.forwardIcon
-              sourceSize.width: 96
-              sourceSize.height: 96
+              sourceSize.width: 128
+              sourceSize.height: 128
               fillMode: Image.PreserveAspectFit
               smooth: true
             }
