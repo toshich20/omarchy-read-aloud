@@ -45,7 +45,7 @@ Preload the models and list every available voice:
 ~/.config/omarchy/plugins/toshich20.read-aloud/bin/read-aloud-tts --list-voices
 ```
 
-The first synthesis downloads the Silero repository and model packages into `cache/torch` inside the plugin directory. Later runs use only the local cache.
+The first synthesis downloads the Silero repository and model packages into `~/.cache/omarchy-read-aloud/torch` (or `$XDG_CACHE_HOME/omarchy-read-aloud/torch`). Later runs use only the local cache. Keeping this cache outside the plugin directory avoids triggering shell plugin reloads during synthesis.
 
 If the widget is not visible, rescan and place it manually:
 

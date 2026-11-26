@@ -9,8 +9,8 @@ import sys
 import tempfile
 import warnings
 
-plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-cache_dir = os.path.join(plugin_dir, "cache")
+cache_home = os.path.expanduser(os.environ.get("XDG_CACHE_HOME") or "~/.cache")
+cache_dir = os.path.join(cache_home, "omarchy-read-aloud")
 hub_dir = os.path.join(cache_dir, "torch")
 sample_rate = 48000
 
