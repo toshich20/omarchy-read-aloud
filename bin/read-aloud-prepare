@@ -35,9 +35,11 @@ common_words = {
     "pay": "ПЭЙ",
     "payment": "ПЭЙМЕНТ",
     "pdf": "ПИ-ДИ-ЭФ",
+    "protobuf": "ПРОТОБУФ",
     "rpc": "АР-ПИ-СИ",
     "service": "СЕРВИС",
     "sql": "СИ-КУЭЛ",
+    "xml": "ЭКС-ЭМ-ЭЛ",
     "ui": "Ю-АЙ",
     "url": "Ю-АР-ЭЛ",
     "user": "+Юзер",
@@ -82,7 +84,7 @@ instruction = """Ты подготовитель текста для локал�
 4. Обери текст в <speak>...</speak>, разбей предложения на <s>...</s>. Используй <p> только для абзацев.
 5. Разрешены только теги speak, s, p, prosody и break. Атрибуты prosody только rate="x-slow|slow|medium|fast|x-fast" и pitch="x-low|low|medium|high|x-high". Атрибут break только time в миллисекундах, не больше 500ms.
 6. Если в чанке два и больше предложений, обязательно выдели одну важную фразу одним тегом prosody. На весь чанк не больше двух prosody и двух break. Не вкладывай prosody друг в друга. Не меняй знаки ? и ! без причины.
-7. Убери скобки, backtick, markdown и латиницу полностью. Текст должен звучать естественно, но без театральности.
+7. Убери только символы круглых и квадратных скобок и backtick, но обязательно сохрани всё, что внутри них: "(эндпоинты)" -> ", эндпоинты", "[пример]" -> ", пример". Никогда не удаляй содержимое скобок. Markdown-разметку и латиницу убери полностью. Текст должен звучать естественно, но без театральности.
 """
 
 
@@ -145,10 +147,15 @@ def normalize_source(text):
         parts = re.split(r"[-_.]", match.group(0))
         return " ".join(split_camel(part) for part in parts)
 
+    text = text.replace("`", "")
+    for opening, closing in (("(", ")"), ("[", "]")):
+        text = text.replace(opening, ", ").replace(closing, ", ")
+    text = re.sub(r",\s*,", ",", text)
+    text = re.sub(r"\s+,", ",", text)
     text = latin_token_pattern.sub(replace, text)
     for pattern, replacement in phrase_patterns:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-    return text
+    return re.sub(r"\s+", " ", transliterate(text)).strip()
 
 
 def sub_outside_tags(text, pattern, replacement, flags=0):
@@ -280,6 +287,9 @@ def clean_text(value, original):
     text = transliterate_outside_tags(text)
     text = canonicalize(text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r">\s+<", "><", text)
+    text = re.sub(r"(<(?:speak|p|s|prosody)[^>]*>)\s+", r"\1", text)
+    text = re.sub(r"\s+(</(?:speak|p|s|prosody)>)", r"\1", text)
     if not text or len(text) > max(600, len(original) * 3):
         raise ValueError("неправдоподобная длина текста")
     if re.search(r"[A-Za-z]", tag_pattern.sub("", text)):
