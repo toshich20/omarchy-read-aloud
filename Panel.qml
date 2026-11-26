@@ -32,14 +32,15 @@ Panel {
   property real position: 0
   property real elapsed: 0
   property real duration: 0
+  property real chunkPosition: 0
+  property real chunkDuration: 0
   property bool paused: false
   property bool downloadable: false
 
   readonly property string ruVoice: selectVoice(root.ruVoices, "ruVoice")
   readonly property string enVoice: selectVoice(root.enVoices, "enVoice")
   readonly property bool active: root.status !== "idle"
-  readonly property real progressValue: root.status === "synthesizing" ? root.percent : (root.duration > 0 ? root.elapsed : 0)
-  readonly property real progressMaximum: root.status === "synthesizing" ? 100 : Math.max(1, root.duration)
+  readonly property bool chunkMode: root.status === "playing" && root.prepared < root.total
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -80,6 +81,8 @@ Panel {
     root.position = 0
     root.elapsed = 0
     root.duration = 0
+    root.chunkPosition = 0
+    root.chunkDuration = 0
     root.paused = false
     root.downloadable = false
   }
@@ -107,6 +110,8 @@ Panel {
     root.position = Math.max(0, numberOr(parsed.position, 0))
     root.elapsed = Math.max(0, numberOr(parsed.elapsed, 0))
     root.duration = Math.max(0, numberOr(parsed.duration, 0))
+    root.chunkPosition = Math.max(0, numberOr(parsed.chunkPosition, 0))
+    root.chunkDuration = Math.max(0, numberOr(parsed.chunkDuration, 0))
     root.paused = parsed.paused === true
     root.downloadable = root.status === "ready"
   }
@@ -116,6 +121,23 @@ Panel {
     var minutes = Math.floor(seconds / 60)
     var rest = seconds % 60
     return minutes + ":" + (rest < 10 ? "0" : "") + rest
+  }
+
+  function progressValue() {
+    if (root.status === "synthesizing") return root.percent
+    if (root.chunkMode) return Math.min(root.chunkDuration > 0 ? root.chunkPosition : 0, root.chunkDuration > 0 ? root.chunkDuration : 1)
+    return root.duration > 0 ? root.elapsed : 0
+  }
+
+  function progressMaximum() {
+    if (root.status === "synthesizing") return 100
+    if (root.chunkMode) return Math.max(1, root.chunkDuration)
+    return Math.max(1, root.duration)
+  }
+
+  function timeText() {
+    if (root.chunkMode) return root.formatTime(root.chunkPosition) + " / " + root.formatTime(root.chunkDuration)
+    return root.duration > 0 ? root.formatTime(root.elapsed) + " / " + root.formatTime(root.duration) : ""
   }
 
   function statusText() {
@@ -158,8 +180,15 @@ Panel {
 
   function seek(value) {
     if (root.status !== "playing" || seekProcess.running) return
-    seekProcess.command = [root.ctlScript, "seek", String(Math.max(0, value))]
+    var action = root.chunkMode ? "seek-chunk" : "seek"
+    seekProcess.command = [root.ctlScript, action, String(Math.max(0, value))]
     seekProcess.running = true
+  }
+
+  function skip(seconds) {
+    if (root.status !== "playing" || skipProcess.running) return
+    skipProcess.command = [root.ctlScript, "skip", String(seconds)]
+    skipProcess.running = true
   }
 
   function save() {
@@ -201,6 +230,11 @@ Panel {
   }
 
   Process {
+    id: skipProcess
+    command: []
+  }
+
+  Process {
     id: saveProcess
     command: [root.saveScript]
   }
@@ -220,10 +254,14 @@ Panel {
         index: root.index,
         total: root.total,
         failed: root.failed,
+        prepared: root.prepared,
         percent: root.percent,
         eta: root.eta,
         elapsed: root.elapsed,
         duration: root.duration,
+        chunkPosition: root.chunkPosition,
+        chunkDuration: root.chunkDuration,
+        generating: root.chunkMode,
         downloadable: root.downloadable
       })
     }
@@ -289,16 +327,16 @@ Panel {
             bar: root.bar
             width: parent.width - timeText.implicitWidth - parent.spacing
             minimum: 0
-            maximum: root.progressMaximum
+            maximum: root.progressMaximum()
             step: 1
-            value: root.progressValue
-            enabled: root.status === "playing" && root.duration > 0
+            value: root.progressValue()
+            enabled: root.status === "playing" && (root.chunkMode ? root.chunkDuration > 0 : root.duration > 0)
             onReleased: function(value) { root.seek(value) }
           }
 
           Text {
             id: timeText
-            text: root.duration > 0 ? root.formatTime(root.elapsed) + " / " + root.formatTime(root.duration) : ""
+            text: root.timeText()
             textFormat: Text.PlainText
             color: root.foreground
             font.family: root.fontFamily
@@ -329,6 +367,24 @@ Panel {
           }
 
           Button {
+            iconText: "\uf04a"
+            tooltipText: strings.t("back5")
+            bordered: true
+            focusable: true
+            enabled: root.status === "playing"
+            onClicked: root.skip(-5)
+          }
+
+          Button {
+            iconText: "\uf04e"
+            tooltipText: strings.t("forward5")
+            bordered: true
+            focusable: true
+            enabled: root.status === "playing"
+            onClicked: root.skip(5)
+          }
+
+          Button {
             iconText: "\uf048"
             tooltipText: strings.t("previous")
             bordered: true
@@ -354,14 +410,6 @@ Panel {
             enabled: root.downloadable
             onClicked: root.save()
           }
-        }
-
-        Button {
-          iconText: "\uf04b"
-          tooltipText: strings.t("read")
-          bordered: true
-          focusable: true
-          onClicked: root.readSelection()
         }
 
         Button {

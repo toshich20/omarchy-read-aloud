@@ -81,14 +81,20 @@ import os
 import sys
 
 path = sys.argv[1]
-data = {}
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        data = {}
+except (OSError, ValueError):
+    data = {}
 for arg in sys.argv[2:]:
     key, _, value = arg.partition("=")
     if key == "durations":
         data[key] = [float(item) for item in value.split(",") if item]
     elif key in {"index", "total", "failed", "prepared", "percent", "eta"}:
         data[key] = int(float(value or 0))
-    elif key in {"duration", "elapsed"}:
+    elif key in {"duration", "elapsed", "chunkPosition", "chunkDuration"}:
         data[key] = float(value or 0)
     else:
         data[key] = value
@@ -127,7 +133,9 @@ for chunk in "${chunks[@]}"; do
   if (( prepared > 0 )); then eta=$(( elapsed * (total - prepared) / prepared )); else eta=0; fi
   percent=$(( prepared * 100 / total ))
   if (( playback_started )); then
-    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" duration=0 elapsed=0 audioPath="$final"
+    duration_list=$(IFS=,; echo "${durations[*]}")
+    total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
+    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" durations="$duration_list" duration="$total_duration" audioPath="$final"
   else
     write_state status=synthesizing index="$index" total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta"
   fi
@@ -168,7 +176,7 @@ for chunk in "${chunks[@]}"; do
     fi
 
     percent=$(( prepared * 100 / total ))
-    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" duration="$total_duration" elapsed=0 durations="$duration_list" audioPath="$final"
+    write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent="$percent" eta="$eta" duration="$total_duration" durations="$duration_list" audioPath="$final"
   else
     failed=$((failed + 1))
   fi
@@ -191,7 +199,7 @@ if [[ -z "$total_duration" || "$total_duration" == "N/A" ]]; then
   total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
 fi
 duration_list=$(IFS=,; echo "${durations[*]}")
-write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent=100 eta=0 duration="$total_duration" elapsed=0 durations="$duration_list" audioPath="$final"
+write_state status=playing index=0 total="$total" failed="$failed" prepared="$prepared" percent=100 eta=0 duration="$total_duration" durations="$duration_list" audioPath="$final"
 
 "$plugin_dir/bin/read-aloud-ctl" wait-end >/dev/null 2>&1 & watcher_pid=$!
 wait "$mpv_pid"

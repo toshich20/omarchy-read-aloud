@@ -15,9 +15,11 @@ def read_state():
     try:
         with open(state_path, encoding="utf-8") as handle:
             data = json.load(handle)
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return data
     except (OSError, ValueError):
-        return {"status": "idle", "index": 0, "total": 0, "failed": 0}
+        pass
+    return {"status": "idle", "index": 0, "total": 0, "failed": 0, "prepared": 0, "durations": []}
 
 
 def send(command):
@@ -55,8 +57,14 @@ def mpv_properties():
     if not os.path.exists(socket_path):
         return {}
     result = {}
-    for key, name in (("position", "time-pos"), ("duration", "duration"),
-                      ("mpvIndex", "playlist-pos"), ("paused", "pause")):
+    names = {
+        "position": "time-pos",
+        "chunkDuration": "duration",
+        "mpvIndex": "playlist-pos",
+        "paused": "pause",
+        "idle": "idle-active",
+    }
+    for key, name in names.items():
         reply = send(["get_property", name])
         if "data" in reply:
             result[key] = reply["data"]
@@ -76,28 +84,85 @@ def durations_from(state):
     return out
 
 
+def is_generating(state):
+    if state.get("status") != "playing":
+        return False
+    try:
+        return int(state.get("prepared", 0)) < int(state.get("total", 0))
+    except (TypeError, ValueError):
+        return False
+
+
+def number_or(value, fallback):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def current_chunk_index(state, props=None):
+    props = props if props is not None else mpv_properties()
+    idx = props.get("mpvIndex")
+    if isinstance(idx, int) and idx >= 0:
+        return idx
+    try:
+        return max(0, int(state.get("index", 1)) - 1)
+    except (TypeError, ValueError):
+        return 0
+
+
+def seek_global(target):
+    state = read_state()
+    durations = durations_from(state)
+    if not durations:
+        send(["seek", target, "absolute"])
+        return
+    total = sum(durations)
+    target = min(max(0.0, target), max(0.0, total - 0.05))
+    remaining = target
+    for idx, duration in enumerate(durations):
+        if duration <= 0 and idx < len(durations) - 1:
+            continue
+        if remaining <= duration or idx == len(durations) - 1:
+            send(["set_property", "playlist-pos", idx])
+            time.sleep(0.15)
+            position = min(max(0.0, remaining), max(0.0, duration - 0.05))
+            send(["set_property", "time-pos", position])
+            break
+        remaining -= duration
+
+
+def seek_chunk(target):
+    state = read_state()
+    props = mpv_properties()
+    duration = number_or(props.get("chunkDuration"), 0.0)
+    if duration <= 0:
+        durations = durations_from(state)
+        idx = current_chunk_index(state, props)
+        duration = durations[idx] if idx < len(durations) else 0.0
+    position = min(max(0.0, target), max(0.0, duration - 0.05)) if duration > 0 else max(0.0, target)
+    send(["set_property", "time-pos", position])
+
+
 if action == "status":
     state = read_state()
-    if state.get("status") == "playing":
-        state.update(mpv_properties())
+    props = mpv_properties() if state.get("status") == "playing" else {}
+    state.update(props)
     durations = durations_from(state)
     if durations and "position" in state:
-        try:
-            idx = state.get("mpvIndex")
-            if not isinstance(idx, int) or idx < 0:
-                idx = max(0, int(state.get("index", 1)) - 1)
-        except (TypeError, ValueError):
-            idx = 0
-        idx = min(idx, len(durations) - 1)
-        try:
-            position = max(0.0, float(state.get("position", 0)))
-        except (TypeError, ValueError):
-            position = 0.0
+        idx = min(current_chunk_index(state, props), len(durations) - 1)
+        position = max(0.0, number_or(state.get("position"), 0.0))
         total = sum(durations)
         state["index"] = idx + 1
         state["duration"] = total
         state["elapsed"] = min(total, sum(durations[:idx]) + position)
+        state["chunkPosition"] = position
+        state["chunkDuration"] = durations[idx]
+    state.setdefault("chunkPosition", 0.0)
+    state.setdefault("chunkDuration", state.get("duration", 0.0))
+    state["generating"] = is_generating(state)
     state.pop("mpvIndex", None)
+    state.pop("idle", None)
     print(json.dumps(state, ensure_ascii=False, separators=(",", ":")))
     sys.exit(0)
 
@@ -124,18 +189,34 @@ if action == "seek":
         target = max(0.0, float(sys.argv[2]))
     except (ValueError, IndexError):
         sys.exit(2)
-    durations = durations_from(read_state())
-    if durations:
-        remaining = target
-        for idx, duration in enumerate(durations):
-            if remaining <= duration or idx == len(durations) - 1:
-                send(["set_property", "playlist-pos", idx])
-                time.sleep(0.15)
-                send(["set_property", "time-pos", max(0.0, remaining)])
-                break
-            remaining -= duration
+    seek_global(target)
+    sys.exit(0)
+
+if action == "seek-chunk":
+    try:
+        target = max(0.0, float(sys.argv[2]))
+    except (ValueError, IndexError):
+        sys.exit(2)
+    seek_chunk(target)
+    sys.exit(0)
+
+if action == "skip":
+    try:
+        delta = float(sys.argv[2])
+    except (ValueError, IndexError):
+        sys.exit(2)
+    state = read_state()
+    if is_generating(state):
+        send(["seek", delta, "relative"])
     else:
-        send(["seek", target, "absolute"])
+        durations = durations_from(state)
+        if not durations:
+            send(["seek", delta, "relative"])
+        else:
+            props = mpv_properties()
+            idx = min(current_chunk_index(state, props), len(durations) - 1)
+            position = number_or(props.get("position"), number_or(state.get("chunkPosition"), 0.0))
+            seek_global(sum(durations[:idx]) + position + delta)
     sys.exit(0)
 
 commands = {

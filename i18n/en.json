@@ -9,6 +9,8 @@
   "pause": "Pause",
   "resume": "Resume",
   "stop": "Stop",
+  "back5": "Back 5s",
+  "forward5": "Forward 5s",
   "previous": "Previous chunk",
   "next": "Next chunk",
   "download": "Download MP3",
