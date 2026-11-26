@@ -8,12 +8,20 @@ playlist="$runtime/playlist.txt"
 concat_list="$runtime/concat.txt"
 final="$runtime/final.mp3"
 tts_script="$plugin_dir/bin/read-aloud-tts"
+prepare_script="$plugin_dir/bin/read-aloud-prepare"
 tts_log="$runtime/tts.log"
 tts_err="$runtime/tts-last.err"
+prepare_err="$runtime/prepare-last.err"
 keep_state=0
 
 ipc() {
   qs ipc --path /usr/share/omarchy/shell call toshich20.read-aloud "$1" >/dev/null 2>&1 || true
+}
+
+warn_prepare() {
+  (( prepare_warned )) && return
+  prepare_warned=1
+  omarchy osd -m "Подготовка текста не удалась — попробуйте выключить подготовку" >/dev/null 2>&1 || true
 }
 
 if [[ -f "$pidfile" ]]; then
@@ -34,17 +42,21 @@ voices=$(python3 - <<'PY'
 import json
 import os
 
-ru = "v5_ru:aidar"
+ru = "v5_6_ru:aidar"
 en = "v3_en:en_0"
 speed = 1.0
+prepare = True
 path = os.path.expanduser("~/.config/omarchy/shell.json")
 
 def walk(node):
-    global ru, en, speed
+    global ru, en, speed, prepare
     if isinstance(node, dict):
         if node.get("id") == "toshich20.read-aloud":
             ru = str(node.get("ruVoice", ru))
             en = str(node.get("enVoice", en))
+            if "prepareText" in node:
+                value = node["prepareText"]
+                prepare = value if isinstance(value, bool) else str(value).strip().lower() in {"1", "true", "yes", "on"}
             try:
                 value = float(str(node.get("speed", "1x")).strip().rstrip("xX"))
                 speed = value if 0.5 <= value <= 3.0 else 1.0
@@ -65,12 +77,14 @@ except (OSError, ValueError):
 print(ru)
 print(en)
 print(format(speed, "g"))
+print("1" if prepare else "0")
 PY
 )
 mapfile -t voice_settings <<< "$voices"
-ru_voice="${voice_settings[0]:-v5_ru:aidar}"
+ru_voice="${voice_settings[0]:-v5_6_ru:aidar}"
 en_voice="${voice_settings[1]:-v3_en:en_0}"
 speed="${voice_settings[2]:-1}"
+prepare_text="${voice_settings[3]:-1}"
 
 mkdir -p "$runtime"
 rm -f "$state" "$socket" "$playlist" "$concat_list" "$final" "$runtime"/chunk-*.mp3
@@ -79,7 +93,7 @@ cleanup() {
   [[ -n "${mpv_pid:-}" ]] && kill "$mpv_pid" 2>/dev/null
   [[ -n "${tts_pid:-}" ]] && kill "$tts_pid" 2>/dev/null
   [[ -n "${watcher_pid:-}" ]] && kill "$watcher_pid" 2>/dev/null
-  rm -f "$pidfile" "$socket" "$playlist" "$concat_list" "$tts_err" "$runtime"/chunk-*.mp3
+  rm -f "$pidfile" "$socket" "$playlist" "$concat_list" "$tts_err" "$prepare_err" "$runtime"/chunk-*.mp3
   (( keep_state )) || rm -f "$state"
 }
 trap cleanup EXIT
@@ -128,7 +142,7 @@ total=${#chunks[@]}
 [[ "$total" -eq 0 ]] && exit 0
 
 : > "$tts_log"
-printf '%s start chunks=%d\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$total" >> "$tts_log"
+printf '%s start chunks=%d prepare=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$total" "$prepare_text" >> "$tts_log"
 
 : > "$playlist"
 : > "$concat_list"
@@ -142,6 +156,7 @@ tts_pid=""
 mpv_pid=""
 watcher_pid=""
 playback_started=0
+prepare_warned=0
 
 for chunk in "${chunks[@]}"; do
   index=$((index + 1))
@@ -162,13 +177,26 @@ for chunk in "${chunks[@]}"; do
     voice="$en_voice"
   fi
 
+  tts_text="$chunk"
+  if [[ "$prepare_text" == "1" && "$voice" == v5_* ]]; then
+    if prepared_chunk=$("$prepare_script" --language ru --text "$chunk" 2>"$prepare_err") && [[ -n "$prepared_chunk" ]]; then
+      tts_text="$prepared_chunk"
+      printf '[%s] prepare=ok chunk=%d/%d\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" >> "$tts_log"
+    else
+      reason=$(tr '\n' ' ' < "$prepare_err" 2>/dev/null)
+      printf '[%s] prepare=fallback chunk=%d/%d reason=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" "${reason:-неизвестная ошибка}" >> "$tts_log"
+      warn_prepare
+    fi
+    rm -f "$prepare_err"
+  fi
+
   audio="$runtime/chunk-$(printf '%03d' "$index").mp3"
   ok=0
   attempt=0
   for delay in 0 1 3; do
     sleep "$delay"
     attempt=$((attempt + 1))
-    if "$tts_script" --voice "$voice" --text "$chunk" --write-media "$audio" >/dev/null 2>"$tts_err" & tts_pid=$!; wait "$tts_pid"; then
+    if "$tts_script" --voice "$voice" --text "$tts_text" --write-media "$audio" >/dev/null 2>"$tts_err" & tts_pid=$!; wait "$tts_pid"; then
       ok=1
       break
     else

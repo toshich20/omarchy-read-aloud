@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "toshich20.read-aloud",
   "name": "Read Aloud",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": "toshich20",
   "description": "Reads selected text aloud with local Silero TTS, split into chunks for long passages.",
   "kinds": ["bar-widget"],
@@ -17,17 +17,18 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "ruVoice": "v5_ru:aidar",
+      "ruVoice": "v5_6_ru:aidar",
       "enVoice": "v3_en:en_0",
-      "speed": "1x"
+      "speed": "1x",
+      "prepareText": true
     },
     "schema": [
       {
         "key": "ruVoice",
         "type": "enum",
         "label": "Russian voice",
-        "options": ["v5_ru:aidar", "v5_ru:baya", "v5_ru:kseniya", "v5_ru:eugene", "v5_ru:xenia"],
-        "defaultValue": "v5_ru:aidar"
+        "options": ["v5_6_ru:aidar", "v5_6_ru:baya", "v5_6_ru:kseniya", "v5_6_ru:eugene", "v5_6_ru:xenia"],
+        "defaultValue": "v5_6_ru:aidar"
       },
       {
         "key": "enVoice",
@@ -43,6 +44,13 @@
         "options": ["1x", "1.5x", "2x"],
         "defaultValue": "1x",
         "description": "Applied to every chunk and kept between chunks."
+      },
+      {
+        "key": "prepareText",
+        "type": "boolean",
+        "label": "Text preparation",
+        "defaultValue": true,
+        "description": "Use local Ollama to add stress marks, SSML intonation and transliteration before Russian TTS."
       }
     ]
   }

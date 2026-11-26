@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+default_model = "qwen3.5:4b-q4_K_M"
+default_endpoint = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/") + "/api/generate"
+allowed_tags = {"speak", "s", "p", "prosody", "break"}
+prosody_values = {
+    "rate": {"x-slow", "slow", "medium", "fast", "x-fast"},
+    "pitch": {"x-low", "low", "medium", "high", "x-high"},
+}
+common_words = {
+    "api": "АПИ",
+    "ai": "АИ",
+    "cpu": "ЦПУ",
+    "css": "СИ-ЭС-ЭС",
+    "gpu": "ГПУ",
+    "html": "ХТМЛ",
+    "http": "ХТТП",
+    "https": "ХТТПС",
+    "id": "АЙ-ДИ",
+    "it": "АЙ-ТИ",
+    "js": "ДЖЕЙ-ЭС",
+    "json": "ДЖЕЙСОН",
+    "llm": "ЭЛ-ЭЛ-ЭМ",
+    "ml": "ЭМ-ЭЛ",
+    "os": "О-ЭС",
+    "pdf": "ПИ-ДИ-ЭФ",
+    "rpc": "АР-ПИ-СИ",
+    "sql": "СИ-КУЭЛ",
+    "ui": "Ю-АЙ",
+    "url": "Ю-АР-ЭЛ",
+    "ux": "Ю-КС",
+}
+letter_map = {
+    "a": "а", "b": "б", "c": "к", "d": "д", "e": "е", "f": "ф",
+    "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л",
+    "m": "м", "n": "н", "o": "о", "p": "п", "q": "к", "r": "р",
+    "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс",
+    "y": "й", "z": "з",
+}
+tag_pattern = re.compile(r"</?([a-z]+)([^>]*)/?>")
+latin_pattern = re.compile(r"[A-Za-z]+")
+control_pattern = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+cyrillic_pattern = re.compile(r"[А-Яа-яЁё]")
+
+instruction = """Ты подготовитель текста для локального TTS Silero по-русски.
+Верни ТОЛЬКО JSON вида {"text":"..."} без объяснений и без markdown.
+
+Правила:
+1. Сохрани смысл, порядок предложений и все слова. Не переводи по смыслу.
+2. Замени всю латиницу кириллицей по произношению: API -> АПИ, RPC -> АР-ПИ-СИ, JSON -> ДЖЕЙСОН, paymentService.pay -> ПЭЙМЕНТ-СЕРВИС ПЭЙ. Не оставляй ни одной латинской буквы.
+3. Поставь один или два служебных символа + перед ударной гласной в ключевых терминах, именах или омонимах. Не больше одного + на каждые 4 обычных слова.
+4. Обери текст в <speak>...</speak>, разбей предложения на <s>...</s>. Используй <p> только для абзацев.
+5. Разрешены только теги speak, s, p, prosody и break. Атрибуты prosody только rate="x-slow|slow|medium|fast|x-fast" и pitch="x-low|low|medium|high|x-high". Атрибут break только time в миллисекундах, не больше 500ms.
+6. Если в чанке два и больше предложений, обязательно выдели одну важную фразу одним тегом prosody. На весь чанк не больше двух prosody и двух break. Не вкладывай prosody друг в друга. Не меняй знаки ? и ! без причины.
+7. Убери скобки, backtick, markdown и латиницу полностью. Текст должен звучать естественно, но без театральности.
+"""
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--text", required=True)
+    parser.add_argument("--language", default="ru")
+    parser.add_argument("--model", default=default_model)
+    parser.add_argument("--endpoint", default=default_endpoint)
+    parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--print", action="store_true", dest="print_result")
+    return parser.parse_args()
+
+
+def fail(message):
+    print("prepare: " + message, file=sys.stderr)
+    return 1
+
+
+def transliterate(text):
+    def replace(match):
+        token = match.group(0)
+        lowered = token.lower()
+        if lowered in common_words:
+            return common_words[lowered]
+        return "".join(letter_map.get(char.lower(), "") for char in token)
+
+    return latin_pattern.sub(replace, text)
+
+
+def transliterate_outside_tags(text):
+    result = []
+    last = 0
+    for match in tag_pattern.finditer(text):
+        result.append(transliterate(text[last:match.start()]))
+        result.append(match.group(0))
+        last = match.end()
+    result.append(transliterate(text[last:]))
+    return "".join(result)
+
+
+def extract_json(raw):
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        pass
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        raise ValueError("LLM вернул не JSON")
+    return json.loads(match.group(0))
+
+
+def request_text(args, prompt):
+    payload = {
+        "model": args.model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "think": False,
+        "keep_alive": "10m",
+        "options": {
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "num_predict": 700,
+        },
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        args.endpoint,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=args.timeout) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    result = extract_json(body.get("response", ""))
+    if not isinstance(result, dict) or not isinstance(result.get("text"), str):
+        raise ValueError("LLM вернул JSON без поля text")
+    return result["text"].strip()
+
+
+def validate_tags(text):
+    stack = []
+    prosody_count = 0
+    break_count = 0
+
+    def replace(match):
+        nonlocal prosody_count, break_count
+        tag = match.group(1)
+        attributes = match.group(2)
+        if tag not in allowed_tags:
+            raise ValueError("недопустимый тег <" + tag + ">")
+        self_closing = attributes.rstrip().endswith("/")
+
+        if tag == "prosody":
+            prosody_count += 1
+            if prosody_count > 2:
+                raise ValueError("слишком много prosody")
+            for name, values in prosody_values.items():
+                found = re.search(name + r'="([^"]+)"', attributes)
+                if found and found.group(1) not in values:
+                    raise ValueError("недопустимое значение " + name)
+        elif tag == "break":
+            break_count += 1
+            if break_count > 2:
+                raise ValueError("слишком много break")
+            found = re.search(r'time="([^"]+)"', attributes)
+            if not found:
+                raise ValueError("break без time")
+            value = found.group(1)
+            if not re.fullmatch(r"\d{1,4}ms", value) or int(value[:-2]) > 500:
+                raise ValueError("недопустимая пауза break")
+
+        if tag == "break" and self_closing:
+            return ""
+        if match.group(0).startswith("</"):
+            if not stack or stack.pop() != tag:
+                raise ValueError("неправильная вложенность тегов")
+        elif not self_closing:
+            stack.append(tag)
+        return match.group(0)
+
+    result = tag_pattern.sub(replace, text)
+    if stack:
+        raise ValueError("незакрытые теги")
+    return result
+
+
+def ensure_prosody(text):
+    if "<prosody" in text:
+        return text
+    matches = list(re.finditer(r"<s>(.*?)</s>", text, flags=re.DOTALL))
+    if len(matches) < 2:
+        return text
+    target = next((match for match in matches if "?" in match.group(1) or "!" in match.group(1)), matches[0])
+    attributes = 'pitch="high"' if "?" in target.group(1) else 'pitch="high" rate="fast"' if "!" in target.group(1) else 'rate="slow"'
+    replacement = "<s><prosody " + attributes + ">" + target.group(1) + "</prosody></s>"
+    return text[:target.start()] + replacement + text[target.end():]
+
+
+def clean_text(value, original):
+    text = control_pattern.sub("", value).replace("\r", " ").replace("\n", " ")
+    text = text.replace("`", "").replace("*", "").replace("[", "").replace("]", "")
+    text = validate_tags(text)
+    text = transliterate_outside_tags(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text or len(text) > max(600, len(original) * 3):
+        raise ValueError("неправдоподобная длина текста")
+    if re.search(r"[A-Za-z]", tag_pattern.sub("", text)):
+        raise ValueError("в тексте осталась латиница")
+
+    if not text.startswith("<speak"):
+        if "<" in text:
+            raise ValueError("недопустимая разметка вне speak")
+        text = "<speak><s>" + text + "</s></speak>"
+    if "<s>" not in text:
+        text = text.replace("<speak>", "<speak><s>", 1).replace("</speak>", "</s></speak>", 1)
+    text = ensure_prosody(text)
+
+    stress_limit = max(1, len(cyrillic_pattern.findall(text)) // 16)
+    parts = text.split("+")
+    if len(parts) - 1 > stress_limit:
+        text = parts[0] + "".join("+" + part for part in parts[1:stress_limit + 1]) + "".join(parts[stress_limit + 1:])
+
+    if not re.search(r"[.!?…]</s>", text) and not re.search(r"[.!?…]</speak>", text):
+        text = re.sub(r"(</s>)(?=\s*</speak>)", r".\1", text, count=1)
+    return text
+
+
+def main():
+    args = parse_args()
+    if args.language != "ru":
+        if args.print_result:
+            print(args.text)
+        return 0
+
+    prompt = instruction + "\nИсходный текст:\n" + args.text + "\n"
+    try:
+        raw = request_text(args, prompt)
+        prepared = clean_text(raw, args.text)
+    except (OSError, urllib.error.URLError, ValueError, KeyError, json.JSONDecodeError) as error:
+        return fail(str(error))
+    print(prepared)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

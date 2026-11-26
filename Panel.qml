@@ -21,7 +21,7 @@ Panel {
   readonly property string backIcon: localPath("icons/back5.png")
   readonly property string forwardIcon: localPath("icons/forward5.png")
 
-  readonly property var ruVoices: ["v5_ru:aidar", "v5_ru:baya", "v5_ru:kseniya", "v5_ru:eugene", "v5_ru:xenia"]
+  readonly property var ruVoices: ["v5_6_ru:aidar", "v5_6_ru:baya", "v5_6_ru:kseniya", "v5_6_ru:eugene", "v5_6_ru:xenia"]
   readonly property var enVoices: ["v3_en:en_0", "v3_en:en_1", "v3_en:en_2", "v3_en:en_3", "v3_en:en_4", "v3_en:en_5", "v3_en:en_6", "v3_en:en_7", "v3_en:en_8", "v3_en:en_9", "v3_en:en_10", "v3_en:en_11"]
   readonly property var speeds: [1, 1.5, 2]
 
@@ -38,6 +38,7 @@ Panel {
   property real chunkPosition: 0
   property real chunkDuration: 0
   property real speed: 1
+  property bool prepareText: true
   property bool paused: false
   property bool downloadable: false
 
@@ -78,6 +79,11 @@ Panel {
     var configured = String(root.setting("speed", "1x")).replace(/[xX]$/, "")
     var number = Number(configured)
     return root.speeds.indexOf(number) >= 0 ? number : 1
+  }
+
+  function selectPrepare() {
+    var configured = root.setting("prepareText", true)
+    return configured === true || configured === 1 || String(configured).toLowerCase() === "true"
   }
 
   function speedLabel(value) {
@@ -189,6 +195,11 @@ Panel {
     root.persistSetting(key, voices[(voices.indexOf(current) + 1) % voices.length])
   }
 
+  function togglePrepare() {
+    root.prepareText = !root.prepareText
+    root.persistSetting("prepareText", root.prepareText)
+  }
+
   function ctl(action) {
     if (ctlProcess.running) return
     if (action === "toggle") root.paused = !root.paused
@@ -252,6 +263,7 @@ Panel {
 
   Component.onCompleted: {
     root.speed = root.selectSpeed()
+    root.prepareText = root.selectPrepare()
     statusProcess.running = true
   }
 
@@ -346,6 +358,7 @@ Panel {
         else if (key === "r" || key === "R") root.readSelection()
         else if (key === "d" || key === "D") root.save()
         else if (key === "v" || key === "V") root.cycleSpeed()
+        else if (key === "t" || key === "T") root.togglePrepare()
       }
 
       Column {
@@ -490,6 +503,15 @@ Panel {
           focusable: true
           leftAlign: true
           onClicked: root.cycleSpeed()
+        }
+
+        Button {
+          text: strings.t("prepare") + ": " + (root.prepareText ? strings.t("on") : strings.t("off"))
+          tooltipText: strings.t("prepare")
+          bordered: true
+          focusable: true
+          leftAlign: true
+          onClicked: root.togglePrepare()
         }
 
         Button {

@@ -15,6 +15,9 @@
   "next": "Next chunk",
   "download": "Download MP3",
   "speed": "Speed",
+  "prepare": "Text preparation",
+  "on": "on",
+  "off": "off",
   "ruVoice": "Russian voice",
   "enVoice": "English voice",
   "failed": "%1 chunk(s) failed"

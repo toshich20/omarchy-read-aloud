@@ -15,8 +15,13 @@ hub_dir = os.path.join(cache_dir, "torch")
 sample_rate = 48000
 
 legacy_voices = {
-    "ru-RU-DmitryNeural": "v5_ru:aidar",
-    "ru-RU-SvetlanaNeural": "v5_ru:kseniya",
+    "ru-RU-DmitryNeural": "v5_6_ru:aidar",
+    "ru-RU-SvetlanaNeural": "v5_6_ru:kseniya",
+    "v5_ru:aidar": "v5_6_ru:aidar",
+    "v5_ru:baya": "v5_6_ru:baya",
+    "v5_ru:kseniya": "v5_6_ru:kseniya",
+    "v5_ru:xenia": "v5_6_ru:xenia",
+    "v5_ru:eugene": "v5_6_ru:eugene",
     "en-US-AndrewNeural": "v3_en:en_0",
     "en-US-JennyNeural": "v3_en:en_1",
     "en-GB-SoniaNeural": "v3_en:en_2",
@@ -43,7 +48,7 @@ def resolve_voice(voice, text):
     voice = legacy_voices.get(voice, voice)
     if ":" not in voice:
         if any("\u0400" <= char <= "\u04ff" for char in text):
-            return "v5_ru", "aidar"
+            return "v5_6_ru", "aidar"
         return "v3_en", "en_0"
     model_name, speaker = voice.split(":", 1)
     return model_name, speaker
@@ -72,17 +77,17 @@ def load_model(model_name):
 
 def list_voices():
     result = {}
-    for language, model_name in (("ru", "v5_ru"), ("en", "v3_en")):
+    for language, model_name in (("ru", "v5_6_ru"), ("en", "v3_en")):
         speakers = getattr(load_model(model_name), "speakers", [])
         result[language] = [model_name + ":" + speaker for speaker in speakers]
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 
 def synthesize(model, speaker, text):
-    import torch
-
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        if "<speak" in text:
+            return model.apply_tts(ssml_text=text, speaker=speaker, sample_rate=sample_rate)
         return model.apply_tts(text=text, speaker=speaker, sample_rate=sample_rate)
 
 
