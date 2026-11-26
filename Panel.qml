@@ -18,6 +18,8 @@ Panel {
   readonly property string ctlScript: localPath("bin/read-aloud-ctl")
   readonly property string saveScript: localPath("bin/read-aloud-save")
   readonly property string readScript: localPath("bin/read-aloud")
+  readonly property string backIcon: localPath("icons/back5.png")
+  readonly property string forwardIcon: localPath("icons/forward5.png")
 
   readonly property var ruVoices: ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"]
   readonly property var enVoices: ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"]
@@ -349,6 +351,7 @@ Panel {
           spacing: Style.space(8)
 
           Button {
+            id: playPauseButton
             iconText: root.paused ? "\uf04b" : "\uf04c"
             tooltipText: root.paused ? strings.t("resume") : strings.t("pause")
             bordered: true
@@ -367,21 +370,47 @@ Panel {
           }
 
           Button {
-            iconText: "\uf04a"
+            id: back5Button
+            width: playPauseButton.implicitWidth
+            height: playPauseButton.implicitHeight
             tooltipText: strings.t("back5")
             bordered: true
             focusable: true
             enabled: root.status === "playing"
             onClicked: root.skip(-5)
+
+            Image {
+              anchors.centerIn: parent
+              width: parent.width * 0.55
+              height: parent.height * 0.55
+              source: root.backIcon
+              sourceSize.width: 96
+              sourceSize.height: 96
+              fillMode: Image.PreserveAspectFit
+              smooth: true
+            }
           }
 
           Button {
-            iconText: "\uf04e"
+            id: forward5Button
+            width: playPauseButton.implicitWidth
+            height: playPauseButton.implicitHeight
             tooltipText: strings.t("forward5")
             bordered: true
             focusable: true
             enabled: root.status === "playing"
             onClicked: root.skip(5)
+
+            Image {
+              anchors.centerIn: parent
+              width: parent.width * 0.55
+              height: parent.height * 0.55
+              source: root.forwardIcon
+              sourceSize.width: 96
+              sourceSize.height: 96
+              fillMode: Image.PreserveAspectFit
+              smooth: true
+            }
           }
 
           Button {
