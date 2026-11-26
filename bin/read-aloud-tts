@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+import argparse
+import contextlib
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import warnings
+
+plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+cache_dir = os.path.join(plugin_dir, "cache")
+hub_dir = os.path.join(cache_dir, "torch")
+sample_rate = 48000
+
+legacy_voices = {
+    "ru-RU-DmitryNeural": "v5_ru:aidar",
+    "ru-RU-SvetlanaNeural": "v5_ru:kseniya",
+    "en-US-AndrewNeural": "v3_en:en_0",
+    "en-US-JennyNeural": "v3_en:en_1",
+    "en-GB-SoniaNeural": "v3_en:en_2",
+    "en-US-GuyNeural": "v3_en:en_3",
+}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--voice")
+    parser.add_argument("--text")
+    parser.add_argument("--write-media")
+    parser.add_argument("--list-voices", action="store_true")
+    return parser.parse_args()
+
+
+def language_for_model(model_name):
+    if model_name.startswith("v3_en") or model_name.startswith("lj_"):
+        return "en"
+    return "ru"
+
+
+def resolve_voice(voice, text):
+    voice = legacy_voices.get(voice, voice)
+    if ":" not in voice:
+        if any("\u0400" <= char <= "\u04ff" for char in text):
+            return "v5_ru", "aidar"
+        return "v3_en", "en_0"
+    model_name, speaker = voice.split(":", 1)
+    return model_name, speaker
+
+
+def load_model(model_name):
+    import torch
+
+    os.makedirs(hub_dir, exist_ok=True)
+    torch.set_num_threads(2)
+    torch.hub.set_dir(hub_dir)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with contextlib.redirect_stdout(io.StringIO()):
+            model, _ = torch.hub.load(
+                "snakers4/silero-models",
+                "silero_tts",
+                language=language_for_model(model_name),
+                speaker=model_name,
+                trust_repo=True,
+                verbose=False,
+            )
+    model.to("cpu")
+    return model
+
+
+def list_voices():
+    result = {}
+    for language, model_name in (("ru", "v5_ru"), ("en", "v3_en")):
+        speakers = getattr(load_model(model_name), "speakers", [])
+        result[language] = [model_name + ":" + speaker for speaker in speakers]
+    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+
+
+def synthesize(model, speaker, text):
+    import torch
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return model.apply_tts(text=text, speaker=speaker, sample_rate=sample_rate)
+
+
+def write_mp3(audio, output):
+    import soundfile
+
+    handle, wav_path = tempfile.mkstemp(prefix="silero-", suffix=".wav", dir=cache_dir)
+    os.close(handle)
+    try:
+        soundfile.write(wav_path, audio.detach().cpu().numpy(), sample_rate, subtype="PCM_16")
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                wav_path,
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                "4",
+                output,
+            ],
+            check=True,
+        )
+    finally:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+
+
+def main():
+    args = parse_args()
+    os.makedirs(cache_dir, exist_ok=True)
+
+    if args.list_voices:
+        list_voices()
+        return 0
+
+    if not args.voice or not args.text or not args.write_media:
+        return 2
+
+    model_name, speaker = resolve_voice(args.voice, args.text)
+    model = load_model(model_name)
+    audio = synthesize(model, speaker, args.text)
+    write_mp3(audio, args.write_media)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as error:
+        print("silero-tts: " + str(error), file=sys.stderr)
+        sys.exit(1)

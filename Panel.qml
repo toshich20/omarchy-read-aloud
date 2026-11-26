@@ -21,8 +21,8 @@ Panel {
   readonly property string backIcon: localPath("icons/back5.png")
   readonly property string forwardIcon: localPath("icons/forward5.png")
 
-  readonly property var ruVoices: ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"]
-  readonly property var enVoices: ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"]
+  readonly property var ruVoices: ["v5_ru:aidar", "v5_ru:baya", "v5_ru:kseniya", "v5_ru:eugene", "v5_ru:xenia"]
+  readonly property var enVoices: ["v3_en:en_0", "v3_en:en_1", "v3_en:en_2", "v3_en:en_3", "v3_en:en_4", "v3_en:en_5", "v3_en:en_6", "v3_en:en_7", "v3_en:en_8", "v3_en:en_9", "v3_en:en_10", "v3_en:en_11"]
   readonly property var speeds: [1, 1.5, 2]
 
   property string status: "idle"
@@ -82,6 +82,11 @@ Panel {
 
   function speedLabel(value) {
     return String(value) + "x"
+  }
+
+  function voiceLabel(value) {
+    var parts = String(value).split(":")
+    return parts.length > 1 ? parts[1] : value
   }
 
   function resetState() {
@@ -488,7 +493,7 @@ Panel {
         }
 
         Button {
-          text: strings.t("ruVoice") + ": " + root.ruVoice
+          text: strings.t("ruVoice") + ": " + root.voiceLabel(root.ruVoice)
           tooltipText: strings.t("ruVoice")
           bordered: true
           focusable: true
@@ -497,7 +502,7 @@ Panel {
         }
 
         Button {
-          text: strings.t("enVoice") + ": " + root.enVoice
+          text: strings.t("enVoice") + ": " + root.voiceLabel(root.enVoice)
           tooltipText: strings.t("enVoice")
           bordered: true
           focusable: true

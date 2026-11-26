@@ -1,15 +1,17 @@
 # Read Aloud
 
-A small Omarchy shell plugin that turns selected text into speech with `edge-tts`, then plays it with `mpv`. Long passages are split into chunks and played as soon as the first chunk is ready, while the remaining audio is still being generated.
+A small Omarchy shell plugin that turns selected text into speech with local Silero TTS, then plays it with `mpv`. Long passages are split into chunks and played as soon as the first chunk is ready, while the remaining audio is still being generated.
 
 ## Features
 
 - Select text anywhere and press `SUPER + ALT + R` to listen to it.
+- Fully offline synthesis after the first model download; no cloud TTS service.
 - Streaming playback: chunk 1 starts while chunks 2, 3, ... are still being synthesized.
 - Automatic Russian/English voice selection based on Cyrillic characters.
 - Bar icon with a keyboard panel: play/pause, stop, jump ±5 seconds, previous/next chunk, speed control, and download.
 - Smart progress bar: tracks the current chunk during generation and the whole recording once generation is complete.
 - Scrubbing by mouse or keyboard; percentage and ETA are visible while preparing audio.
+- Playback speeds 1x, 1.5x and 2x, kept between chunks.
 - Save the combined recording as an MP3 through a native file dialog.
 - English and Russian UI translations.
 
@@ -19,9 +21,11 @@ A small Omarchy shell plugin that turns selected text into speech with `edge-tts
 | --- | --- |
 | Omarchy shell / Quickshell | Bar widget and keyboard panel |
 | Hyprland / Wayland | Clipboard selection and hotkeys |
-| `edge-tts` | Speech synthesis |
+| `python-pytorch-opt` | Local Silero TTS inference with AVX2 optimizations |
+| `python-soundfile` | Writing generated audio |
+| `python-omegaconf` | Silero model metadata loader |
 | `mpv` | Audio playback and IPC control |
-| `ffmpeg`, `ffprobe` | Concatenating chunks and measuring duration |
+| `ffmpeg`, `ffprobe` | MP3 conversion, concatenating chunks and measuring duration |
 | `wl-clipboard` | Reading the selected text |
 | `zenity` | Save-file dialog |
 | `python3`, `jq` | Runtime helpers |
@@ -31,10 +35,17 @@ A small Omarchy shell plugin that turns selected text into speech with `edge-tts
 
 ```bash
 omarchy plugin add https://github.com/toshich20/omarchy-read-aloud.git --enable --yes
-omarchy pkg aur add python-edge-tts
-omarchy pkg add mpv ffmpeg zenity wl-clipboard
+omarchy pkg add python-pytorch-opt python-soundfile python-omegaconf mpv ffmpeg zenity wl-clipboard
 ~/.config/omarchy/plugins/toshich20.read-aloud/install.sh
 ```
+
+Preload the models and list every available voice:
+
+```bash
+~/.config/omarchy/plugins/toshich20.read-aloud/bin/read-aloud-tts --list-voices
+```
+
+The first synthesis downloads the Silero repository and model packages into `cache/torch` inside the plugin directory. Later runs use only the local cache.
 
 If the widget is not visible, rescan and place it manually:
 
@@ -81,17 +92,19 @@ During generation the progress bar follows the current chunk. Once all chunks ha
 
 ## Configuration
 
-Open the panel and click the Russian or English voice button to cycle through available voices. Click the speed button or press `V` to cycle 1x, 1.5x and 2x. Choices are stored in `~/.config/omarchy/shell.json` under the `toshich20.read-aloud` entry and survive shell restarts. The selected speed is applied to the running `mpv` process, so it is not reset when the next chunk starts.
+Open the panel and click the Russian or English voice button to cycle through the curated voices. Click the speed button or press `V` to cycle 1x, 1.5x and 2x. Choices are stored in `~/.config/omarchy/shell.json` under the `toshich20.read-aloud` entry and survive shell restarts. The selected speed is applied to the running `mpv` process, so it is not reset when the next chunk starts.
 
-Default voices:
+Voice IDs use the `model:speaker` format. Defaults:
 
-- Russian: `ru-RU-DmitryNeural`
-- English: `en-US-AndrewNeural`
+- Russian: `v5_ru:aidar`
+- English: `v3_en:en_0`
 - Speed: `1x`
+
+The panel cycles a short curated list. To see all available speakers, run `read-aloud-tts --list-voices` and put any returned ID into `ruVoice` or `enVoice` manually.
 
 ## How it works
 
-Text is split into chunks of up to 450 characters. Each chunk is synthesized with `edge-tts`, measured with `ffprobe`, and appended to the running `mpv` playlist through its Unix socket. After the last chunk is generated, `ffmpeg` concatenates the pieces into `final.mp3` so it can be saved. Runtime state lives in `$XDG_RUNTIME_DIR/read-aloud/state.json`.
+Text is split into chunks of up to 450 characters. Each chunk is synthesized by `bin/read-aloud-tts`: Silero produces audio in memory, `soundfile` writes a temporary WAV, and `ffmpeg` converts it to MP3. `ffprobe` measures duration, and each chunk is appended to the running `mpv` playlist through its Unix socket. After the last chunk is generated, `ffmpeg` concatenates the pieces into `final.mp3` so it can be saved. Runtime state lives in `$XDG_RUNTIME_DIR/read-aloud/state.json`.
 
 ## Troubleshooting
 
@@ -101,18 +114,25 @@ Check the current player state:
 ~/.config/omarchy/plugins/toshich20.read-aloud/bin/read-aloud-ctl status
 ```
 
+Inspect synthesis attempts and errors:
+
+```bash
+cat "${XDG_RUNTIME_DIR:-/tmp}/read-aloud/tts.log"
+```
+
 If the bar icon does not appear after an update, restart the shell:
 
 ```bash
 omarchy restart shell
 ```
 
-If `edge-tts` reports `NoAudioReceived`, the service is temporarily rejecting a request; the plugin retries failed chunks with short backoff. Every attempt is logged to `$XDG_RUNTIME_DIR/read-aloud/tts.log`.
+If the first run is slow, it is downloading the Silero model packages. Subsequent runs are local.
 
 To verify synthesis directly:
 
 ```bash
-edge-tts --voice en-US-AndrewNeural --text "Test" --write-media /tmp/read-aloud-test.mp3
+~/.config/omarchy/plugins/toshich20.read-aloud/bin/read-aloud-tts \
+  --voice v5_ru:aidar --text "Test" --write-media /tmp/read-aloud-test.mp3
 ```
 
 ## Author

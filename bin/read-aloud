@@ -7,6 +7,7 @@ socket="$runtime/mpv.sock"
 playlist="$runtime/playlist.txt"
 concat_list="$runtime/concat.txt"
 final="$runtime/final.mp3"
+tts_script="$plugin_dir/bin/read-aloud-tts"
 tts_log="$runtime/tts.log"
 tts_err="$runtime/tts-last.err"
 keep_state=0
@@ -33,8 +34,8 @@ voices=$(python3 - <<'PY'
 import json
 import os
 
-ru = "ru-RU-DmitryNeural"
-en = "en-US-AndrewNeural"
+ru = "v5_ru:aidar"
+en = "v3_en:en_0"
 speed = 1.0
 path = os.path.expanduser("~/.config/omarchy/shell.json")
 
@@ -67,8 +68,8 @@ print(format(speed, "g"))
 PY
 )
 mapfile -t voice_settings <<< "$voices"
-ru_voice="${voice_settings[0]:-ru-RU-DmitryNeural}"
-en_voice="${voice_settings[1]:-en-US-AndrewNeural}"
+ru_voice="${voice_settings[0]:-v5_ru:aidar}"
+en_voice="${voice_settings[1]:-v3_en:en_0}"
 speed="${voice_settings[2]:-1}"
 
 mkdir -p "$runtime"
@@ -167,13 +168,13 @@ for chunk in "${chunks[@]}"; do
   for delay in 0 1 3; do
     sleep "$delay"
     attempt=$((attempt + 1))
-    if edge-tts --voice "$voice" --text "$chunk" --write-media "$audio" >/dev/null 2>"$tts_err" & tts_pid=$!; wait "$tts_pid"; then
+    if "$tts_script" --voice "$voice" --text "$chunk" --write-media "$audio" >/dev/null 2>"$tts_err" & tts_pid=$!; wait "$tts_pid"; then
       ok=1
       break
     else
       rc=$?
       {
-        printf '[%s] chunk=%d/%d voice=%s attempt=%d failed rc=%d\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" "$voice" "$attempt" "$rc"
+        printf '[%s] backend=silero chunk=%d/%d voice=%s attempt=%d failed rc=%d\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" "$voice" "$attempt" "$rc"
         cat "$tts_err"
       } >> "$tts_log"
       rm -f "$tts_err"
@@ -184,7 +185,7 @@ for chunk in "${chunks[@]}"; do
     audio_files+=("$audio")
     prepared=$((prepared + 1))
     duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$audio" 2>/dev/null || true)
-    printf '[%s] chunk=%d/%d voice=%s attempt=%d ok duration=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" "$voice" "$attempt" "${duration:-0}" >> "$tts_log"
+    printf '[%s] backend=silero chunk=%d/%d voice=%s attempt=%d ok duration=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$index" "$total" "$voice" "$attempt" "${duration:-0}" >> "$tts_log"
     durations+=("${duration:-0}")
     duration_list=$(IFS=,; echo "${durations[*]}")
     total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")

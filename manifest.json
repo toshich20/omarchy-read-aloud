@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "toshich20.read-aloud",
   "name": "Read Aloud",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "author": "toshich20",
-  "description": "Reads selected text aloud with edge-tts, split into chunks for long passages.",
+  "description": "Reads selected text aloud with local Silero TTS, split into chunks for long passages.",
   "kinds": ["bar-widget"],
   "activation": "on-demand",
   "entryPoints": {
@@ -12,13 +12,13 @@
   },
   "barWidget": {
     "displayName": "Read Aloud",
-    "description": "Bar icon and player panel for edge-tts speech synthesis.",
+    "description": "Bar icon and player panel for local Silero TTS speech synthesis.",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "ruVoice": "ru-RU-DmitryNeural",
-      "enVoice": "en-US-AndrewNeural",
+      "ruVoice": "v5_ru:aidar",
+      "enVoice": "v3_en:en_0",
       "speed": "1x"
     },
     "schema": [
@@ -26,15 +26,15 @@
         "key": "ruVoice",
         "type": "enum",
         "label": "Russian voice",
-        "options": ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"],
-        "defaultValue": "ru-RU-DmitryNeural"
+        "options": ["v5_ru:aidar", "v5_ru:baya", "v5_ru:kseniya", "v5_ru:eugene", "v5_ru:xenia"],
+        "defaultValue": "v5_ru:aidar"
       },
       {
         "key": "enVoice",
         "type": "enum",
         "label": "English voice",
-        "options": ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"],
-        "defaultValue": "en-US-AndrewNeural"
+        "options": ["v3_en:en_0", "v3_en:en_1", "v3_en:en_2", "v3_en:en_3", "v3_en:en_4", "v3_en:en_5", "v3_en:en_6", "v3_en:en_7", "v3_en:en_8", "v3_en:en_9", "v3_en:en_10", "v3_en:en_11"],
+        "defaultValue": "v3_en:en_0"
       },
       {
         "key": "speed",
