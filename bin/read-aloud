@@ -33,14 +33,20 @@ import os
 
 ru = "ru-RU-DmitryNeural"
 en = "en-US-AndrewNeural"
+speed = 1.0
 path = os.path.expanduser("~/.config/omarchy/shell.json")
 
 def walk(node):
-    global ru, en
+    global ru, en, speed
     if isinstance(node, dict):
         if node.get("id") == "toshich20.read-aloud":
             ru = str(node.get("ruVoice", ru))
             en = str(node.get("enVoice", en))
+            try:
+                value = float(str(node.get("speed", "1x")).strip().rstrip("xX"))
+                speed = value if 0.5 <= value <= 3.0 else 1.0
+            except ValueError:
+                pass
         for value in node.values():
             walk(value)
     elif isinstance(node, list):
@@ -55,11 +61,13 @@ except (OSError, ValueError):
 
 print(ru)
 print(en)
+print(format(speed, "g"))
 PY
 )
 mapfile -t voice_settings <<< "$voices"
 ru_voice="${voice_settings[0]:-ru-RU-DmitryNeural}"
 en_voice="${voice_settings[1]:-en-US-AndrewNeural}"
+speed="${voice_settings[2]:-1}"
 
 mkdir -p "$runtime"
 rm -f "$state" "$socket" "$playlist" "$concat_list" "$final" "$runtime"/chunk-*.mp3
@@ -106,6 +114,8 @@ with open(tmp, "w", encoding="utf-8") as handle:
 os.replace(tmp, path)
 PY
 }
+
+write_state speed="$speed"
 
 printf '%s\n' "$$" > "$pidfile"
 ipc open
@@ -165,7 +175,7 @@ for chunk in "${chunks[@]}"; do
     total_duration=$(python3 -c 'import sys; print(sum(map(float, sys.argv[1:])) if len(sys.argv) > 1 else 0)' "${durations[@]}")
 
     if (( ! playback_started )); then
-      mpv --no-video --really-quiet --idle=yes --input-ipc-server="$socket" "$audio" & mpv_pid=$!
+      mpv --no-video --really-quiet --idle=yes --speed="$speed" --input-ipc-server="$socket" "$audio" & mpv_pid=$!
       for _ in $(seq 1 50); do
         [[ -S "$socket" ]] && "$plugin_dir/bin/read-aloud-ctl" status >/dev/null 2>&1 && break
         sleep 0.1

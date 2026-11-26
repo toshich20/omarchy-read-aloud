@@ -19,7 +19,21 @@ def read_state():
             return data
     except (OSError, ValueError):
         pass
-    return {"status": "idle", "index": 0, "total": 0, "failed": 0, "prepared": 0, "durations": []}
+    return {"status": "idle", "index": 0, "total": 0, "failed": 0, "prepared": 0, "durations": [], "speed": 1.0}
+
+
+def write_state(**values):
+    data = read_state()
+    for key, value in values.items():
+        data[key] = value
+    tmp = state_path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.write("\n")
+        os.replace(tmp, state_path)
+    except OSError as error:
+        print(str(error), file=sys.stderr)
 
 
 def send(command):
@@ -63,6 +77,7 @@ def mpv_properties():
         "mpvIndex": "playlist-pos",
         "paused": "pause",
         "idle": "idle-active",
+        "speed": "speed",
     }
     for key, name in names.items():
         reply = send(["get_property", name])
@@ -160,6 +175,7 @@ if action == "status":
         state["chunkDuration"] = durations[idx]
     state.setdefault("chunkPosition", 0.0)
     state.setdefault("chunkDuration", state.get("duration", 0.0))
+    state["speed"] = number_or(state.get("speed"), 1.0)
     state["generating"] = is_generating(state)
     state.pop("mpvIndex", None)
     state.pop("idle", None)
@@ -217,6 +233,16 @@ if action == "skip":
             idx = min(current_chunk_index(state, props), len(durations) - 1)
             position = number_or(props.get("position"), number_or(state.get("chunkPosition"), 0.0))
             seek_global(sum(durations[:idx]) + position + delta)
+    sys.exit(0)
+
+if action == "speed":
+    try:
+        speed = float(sys.argv[2])
+    except (ValueError, IndexError):
+        sys.exit(2)
+    speed = min(3.0, max(0.5, speed))
+    send(["set_property", "speed", speed])
+    write_state(speed=speed)
     sys.exit(0)
 
 commands = {

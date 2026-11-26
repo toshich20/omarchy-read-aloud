@@ -7,7 +7,7 @@ A small Omarchy shell plugin that turns selected text into speech with `edge-tts
 - Select text anywhere and press `SUPER + ALT + R` to listen to it.
 - Streaming playback: chunk 1 starts while chunks 2, 3, ... are still being synthesized.
 - Automatic Russian/English voice selection based on Cyrillic characters.
-- Bar icon with a keyboard panel: play/pause, stop, jump ±5 seconds, previous/next chunk, and download.
+- Bar icon with a keyboard panel: play/pause, stop, jump ±5 seconds, previous/next chunk, speed control, and download.
 - Smart progress bar: tracks the current chunk during generation and the whole recording once generation is complete.
 - Scrubbing by mouse or keyboard; percentage and ETA are visible while preparing audio.
 - Save the combined recording as an MP3 through a native file dialog.
@@ -73,6 +73,7 @@ Pressing the shortcut again stops the current playback and closes the panel.
 | `S` | Stop |
 | `R` | Read the current selection |
 | `D` | Download the MP3 |
+| `V` | Cycle playback speed: 1x → 1.5x → 2x |
 | `Back 5s`, `Forward 5s` | Seek relative to the current position |
 | `Previous`, `Next` | Switch chunks |
 
@@ -80,12 +81,13 @@ During generation the progress bar follows the current chunk. Once all chunks ha
 
 ## Configuration
 
-Open the panel and click the Russian or English voice button to cycle through available voices. Choices are stored in `~/.config/omarchy/shell.json` under the `toshich20.read-aloud` entry and survive shell restarts.
+Open the panel and click the Russian or English voice button to cycle through available voices. Click the speed button or press `V` to cycle 1x, 1.5x and 2x. Choices are stored in `~/.config/omarchy/shell.json` under the `toshich20.read-aloud` entry and survive shell restarts. The selected speed is applied to the running `mpv` process, so it is not reset when the next chunk starts.
 
 Default voices:
 
 - Russian: `ru-RU-DmitryNeural`
 - English: `en-US-AndrewNeural`
+- Speed: `1x`
 
 ## How it works
 

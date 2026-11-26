@@ -23,6 +23,7 @@ Panel {
 
   readonly property var ruVoices: ["ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"]
   readonly property var enVoices: ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"]
+  readonly property var speeds: [1, 1.5, 2]
 
   property string status: "idle"
   property int index: 0
@@ -36,6 +37,7 @@ Panel {
   property real duration: 0
   property real chunkPosition: 0
   property real chunkDuration: 0
+  property real speed: 1
   property bool paused: false
   property bool downloadable: false
 
@@ -70,6 +72,16 @@ Panel {
   function selectVoice(voices, key) {
     var configured = String(root.setting(key, voices[0]))
     return voices.indexOf(configured) >= 0 ? configured : voices[0]
+  }
+
+  function selectSpeed() {
+    var configured = String(root.setting("speed", "1x")).replace(/[xX]$/, "")
+    var number = Number(configured)
+    return root.speeds.indexOf(number) >= 0 ? number : 1
+  }
+
+  function speedLabel(value) {
+    return String(value) + "x"
   }
 
   function resetState() {
@@ -193,6 +205,20 @@ Panel {
     skipProcess.running = true
   }
 
+  function setSpeed(value) {
+    var number = Number(value)
+    if (root.speeds.indexOf(number) < 0) return
+    root.speed = number
+    root.persistSetting("speed", root.speedLabel(number))
+    speedProcess.command = [root.ctlScript, "speed", String(number)]
+    speedProcess.running = true
+  }
+
+  function cycleSpeed() {
+    var index = root.speeds.indexOf(root.speed)
+    root.setSpeed(root.speeds[(index + 1) % root.speeds.length])
+  }
+
   function save() {
     if (!root.downloadable || saveProcess.running) return
     saveProcess.running = true
@@ -219,7 +245,10 @@ Panel {
     onTriggered: if (!statusProcess.running) statusProcess.running = true
   }
 
-  Component.onCompleted: statusProcess.running = true
+  Component.onCompleted: {
+    root.speed = root.selectSpeed()
+    statusProcess.running = true
+  }
 
   Process {
     id: ctlProcess
@@ -237,6 +266,11 @@ Panel {
   }
 
   Process {
+    id: speedProcess
+    command: []
+  }
+
+  Process {
     id: saveProcess
     command: [root.saveScript]
   }
@@ -250,6 +284,7 @@ Panel {
     function pause() { root.ctl("pause") }
     function resume() { root.ctl("resume") }
     function stop() { root.ctl("stop") }
+    function setSpeed(value: string) { root.setSpeed(Number(value)) }
     function status(): string {
       return JSON.stringify({
         status: root.status,
@@ -263,6 +298,7 @@ Panel {
         duration: root.duration,
         chunkPosition: root.chunkPosition,
         chunkDuration: root.chunkDuration,
+        speed: root.speed,
         generating: root.chunkMode,
         downloadable: root.downloadable
       })
@@ -304,6 +340,7 @@ Panel {
         else if (key === "s" || key === "S") root.ctl("stop")
         else if (key === "r" || key === "R") root.readSelection()
         else if (key === "d" || key === "D") root.save()
+        else if (key === "v" || key === "V") root.cycleSpeed()
       }
 
       Column {
@@ -439,6 +476,15 @@ Panel {
             enabled: root.downloadable
             onClicked: root.save()
           }
+        }
+
+        Button {
+          text: strings.t("speed") + ": " + root.speedLabel(root.speed)
+          tooltipText: strings.t("speed")
+          bordered: true
+          focusable: true
+          leftAlign: true
+          onClicked: root.cycleSpeed()
         }
 
         Button {

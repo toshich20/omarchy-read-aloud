@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "toshich20.read-aloud",
   "name": "Read Aloud",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "author": "toshich20",
   "description": "Reads selected text aloud with edge-tts, split into chunks for long passages.",
   "kinds": ["bar-widget"],
@@ -18,7 +18,8 @@
     "defaultSection": "right",
     "defaults": {
       "ruVoice": "ru-RU-DmitryNeural",
-      "enVoice": "en-US-AndrewNeural"
+      "enVoice": "en-US-AndrewNeural",
+      "speed": "1x"
     },
     "schema": [
       {
@@ -34,6 +35,14 @@
         "label": "English voice",
         "options": ["en-US-AndrewNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", "en-US-GuyNeural"],
         "defaultValue": "en-US-AndrewNeural"
+      },
+      {
+        "key": "speed",
+        "type": "enum",
+        "label": "Playback speed",
+        "options": ["1x", "1.5x", "2x"],
+        "defaultValue": "1x",
+        "description": "Applied to every chunk and kept between chunks."
       }
     ]
   }
