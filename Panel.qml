@@ -381,8 +381,8 @@ Panel {
 
             Image {
               anchors.centerIn: parent
-              width: parent.width * 0.95
-              height: parent.height * 0.95
+              width: parent.width * 0.85
+              height: parent.height * 0.85
               source: root.backIcon
               sourceSize.width: 128
               sourceSize.height: 128
@@ -403,8 +403,8 @@ Panel {
 
             Image {
               anchors.centerIn: parent
-              width: parent.width * 0.95
-              height: parent.height * 0.95
+              width: parent.width * 0.85
+              height: parent.height * 0.85
               source: root.forwardIcon
               sourceSize.width: 128
               sourceSize.height: 128
